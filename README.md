@@ -171,3 +171,11 @@ flutter test
 Licensed under the **Apache License 2.0**. See `LICENSE` for the full legal text.
 
 **Developed with by Team Mobo at [Cybrosys Technologies](https://www.cybrosys.com)**
+
+
+## Maintainers
+
+Team Mobo at Cybrosys Technologies
+Email: mobo@cybrosys.com
+Website: [cybrosys.com](https://cybrosys.com/mobo/)
+
