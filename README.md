@@ -131,6 +131,7 @@ The app requires the following permissions in `AndroidManifest.xml`:
 - **Pod Install Failure**: Ensure your CocoaPods version is 1.15.0 or higher. Run `pod repo update` if dependencies are not found.
 - **Scanning Issues**: Verify the camera permission is enabled in the device settings.
 - **Sync Failure**: Ensure the Odoo server URL starts with `https://` (unless local testing) and is accessible from the mobile network.
+- **Login Issues**: Verify your database name and ensuring the user has Invoicing permissions in Odoo.
 
 ---
 
@@ -158,6 +159,13 @@ flutter test
 
 ---
 
+##  Configuration
+1. **Server Setup**: Enter your Odoo Server URL and Database on the login screen.
+2. **Credentials**: Log in with your standard Odoo user credentials.
+3. **Company Selection**: Switch between allowed companies from the profile menu.
+
+---
+
 ## Contributing
 1. Fork the repo.
 2. Create your Feature Branch (`git checkout -b feature/CoolFeature`).
@@ -173,9 +181,7 @@ Licensed under the **Apache License 2.0**. See `LICENSE` for the full legal text
 **Developed with by Team Mobo at [Cybrosys Technologies](https://www.cybrosys.com)**
 
 
-## Maintainers
-
-Team Mobo at Cybrosys Technologies
-Email: mobo@cybrosys.com
-Website: [cybrosys.com](https://cybrosys.com/mobo/)
-
+##  Maintainers
+**Team Mobo at Cybrosys Technologies**
+- Email: [mobo@cybrosys.com](mailto:mobo@cybrosys.com)
+- Website: [cybrosys.com](https://www.cybrosys.com)
