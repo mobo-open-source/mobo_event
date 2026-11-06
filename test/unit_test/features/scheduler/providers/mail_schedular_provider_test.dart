@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobo_event/features/scheduler/model/event_mail_scheduler.dart';
 import 'package:mobo_event/features/scheduler/provider/mail_scheduler_provider.dart';
@@ -85,5 +87,32 @@ void main(){
     provider.reset();
     expect(provider.loading, true);
   });
-}
 
+  test("a late answer for an event the screen has left is dropped", () async {
+    final slow = Completer<List<EventMailScheduler>>();
+    EventMailScheduler mail(int id) => EventMailScheduler(
+      id: id,
+      sequence: 1,
+      intervalNbr: 2,
+      intervalUnit: '',
+      intervalType: '',
+      mailRegistrationIds: [],
+      mailSlotIds: [],
+      mailDone: true,
+      mailState: '',
+      mailCountDone: 2,
+      notificationType: '',
+    );
+    when(() => services.fetchCommunication(1)).thenAnswer((_) => slow.future);
+    when(() => services.fetchCommunication(2))
+        .thenAnswer((_) async => [mail(20)]);
+
+    final first = provider.fetchScheduledMail(1);
+    await provider.fetchScheduledMail(2);
+    slow.complete([mail(10)]);
+    await first;
+
+    expect(provider.scheduledMails.single.id, 20);
+    expect(provider.loading, false);
+  });
+}

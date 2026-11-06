@@ -12,8 +12,6 @@ class AppRoutes {
   /// Private constructor to prevent instantiation
   AppRoutes._();
 
-  /// ==================== Auth & Setup Routes ====================
-
   /// Splash screen - shown on app launch
   static const String splash = '/';
 
@@ -24,24 +22,17 @@ class AppRoutes {
   /// Requires arguments: {'url': String, 'database': String}
   static const String login = '/login';
 
-  /// Add account screen - add additional Odoo account
-  static const String addAccount = '/add_account';
-
   /// App lock screen - biometric/PIN authentication
   static const String appLock = '/app_lock';
 
   /// Reset password screen
   static const String resetPassword = '/reset_password';
 
-  /// ==================== Main App Routes ====================
-
   /// App entry point - handles authentication check and routing
   static const String app = '/app';
 
   /// Home scaffold - main app container with bottom navigation
   static const String home = '/home';
-
-  /// ==================== Feature Routes ====================
 
   /// Dashboard screen
   static const String dashboard = '/dashboard';

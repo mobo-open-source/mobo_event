@@ -13,16 +13,18 @@ class FullCardShimmer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Shimmer.fromColors(
-      baseColor: Colors.grey.shade300,
-      highlightColor: Colors.grey.shade100,
+      baseColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+      highlightColor: isDark ? Colors.grey.shade700 : Colors.grey.shade100,
       period: const Duration(milliseconds: 1200),
       child: Container(
         height: height,
         width: double.infinity,
         margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 5),
         decoration: BoxDecoration(
-          color: Colors.grey.shade300,
+          color: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
           borderRadius: BorderRadius.circular(12),
         ),
       ),

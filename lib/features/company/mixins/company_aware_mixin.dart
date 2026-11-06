@@ -19,26 +19,24 @@ mixin CompanyAwareMixin<T extends StatefulWidget> on State<T> {
       final currentCompanyId = companyProvider.selectedCompanyId;
 
       if (_lastCompanyId != null && _lastCompanyId != currentCompanyId) {
-
         onCompanyChanged(currentCompanyId);
       }
 
       _lastCompanyId = currentCompanyId;
-    } catch (e) {
-        }
+    } catch (_) {}
   }
 
   /// Override this method to handle company changes
   /// This will be called when the selected company changes
   void onCompanyChanged(int? newCompanyId) {
-      /// Override in your widget to reload data
+    // Override in your widget to reload data
   }
 
   /// Helper to get current company ID
   int? getCurrentCompanyId() {
     try {
       return context.read<CompanyProvider>().selectedCompanyId;
-    } catch (e) {
+    } catch (_) {
         return null;
     }
   }

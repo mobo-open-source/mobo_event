@@ -1,281 +1,103 @@
-import 'dart:async';
 import 'dart:convert';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
-
 import 'package:provider/provider.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+
 import '../../../app/app_entry.dart';
-import '../../../core/const/app_colors.dart';
-import '../../../core/services/session_service.dart';
-import '../../../core/services/odoo_session_manager.dart';
-import '../../../core/services/biometric_context_service.dart';
-import '../../../shared/widgets/snackbars/custom_snackbar.dart';
-import '../../company/providers/company_provider.dart';
-import '../../login/pages/credentials_screen.dart';
+import '../../../core/exceptions/app_exceptions.dart';
+import '../../../core/models/appsession.dart';
 import '../../../core/routing/page_transition.dart';
-import '../../../app/home_scaffold.dart';
+import '../../../core/services/biometric_context_service.dart';
+import '../../../core/services/event_access_gate.dart';
+import '../../../core/services/event_module_gate.dart';
+import '../../../core/services/odoo_session_manager.dart';
+import '../../../core/services/session_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/database_expiry.dart';
+import '../../../shared/widgets/dialogs/access_denied_dialog.dart';
+import '../../../shared/widgets/dialogs/blocking_notice_dialog.dart';
+import '../../../shared/widgets/dialogs/common_dialog.dart';
+import '../../../shared/widgets/dialogs/loading_dialog.dart';
+import '../../../shared/widgets/dialogs/module_missing_dialog.dart';
+import '../../../shared/widgets/snackbars/custom_snackbar.dart';
+import '../../home/providers/home_provider.dart';
+import '../../login/pages/credentials_screen.dart';
+import '../../login/pages/otp_page.dart';
 import '../../login/pages/server_setup_screen.dart';
+import '../../login/utils/auth_failure.dart';
 import '../providers/profile_provider.dart';
 
+/// How a switch attempt ended — decided by [_performSwitch], presented by
+/// [SwitchAccountWidget._switchAccount] once the loading dialog is gone.
+enum _SwitchOutcome {
+  switched,
+  twoFactorRequired,
+  needsSignIn,
+  moduleMissing,
+  portalUser,
+  databaseExpired,
+  noEventAccess,
+  failed,
+}
+
+typedef _SwitchResult = ({_SwitchOutcome outcome, String? message});
+
+/// Account switcher in the Profile screen's quick-actions card: the other
+/// saved accounts, switching to or removing each, and Add Account.
 class SwitchAccountWidget extends StatelessWidget {
   const SwitchAccountWidget({super.key});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color subtitleColor = isDark ? Colors.grey[400]! : Colors.grey[600]!;
-    final Color iconColor = isDark ? Colors.grey[400]! : Colors.grey[600]!;
+    final secondary = isDark ? Colors.grey[400]! : Colors.grey[600]!;
 
     return Consumer<SessionService>(
       builder: (context, sessionService, child) {
-        final currentSession = sessionService.currentSession;
-
-        final otherAccounts = sessionService.storedAccounts.where((account) {
-          if (currentSession == null) return false;
-          if (account['userId'] == currentSession.userId) return false;
-
-          return !_isCurrentAccount(account, sessionService);
-        }).toList();
-
-
-        final accountCount = otherAccounts.length;
+        final current = sessionService.currentSession;
+        final otherAccounts = current == null
+            ? const <Map<String, dynamic>>[]
+            : sessionService.storedAccounts
+                  .where((account) => !_isAccountOf(account, current))
+                  .toList();
+        final count = otherAccounts.length;
 
         return ExpansionTile(
-          leading: HugeIcon(icon:HugeIcons.strokeRoundedUserSwitch, color: iconColor),
+          leading: HugeIcon(
+            icon: HugeIcons.strokeRoundedUserSwitch,
+            color: secondary,
+          ),
           title: const Text(
             'Switch Accounts',
             style: TextStyle(fontWeight: FontWeight.w500),
           ),
           subtitle: Text(
-            accountCount > 0
-                ? '$accountCount other account${accountCount != 1 ? 's' : ''} available'
+            count > 0
+                ? '$count other account${count != 1 ? 's' : ''} available'
                 : 'Add multiple accounts to switch quickly',
-            style: TextStyle(color: subtitleColor),
+            style: TextStyle(color: secondary),
           ),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           children: [
-            if (accountCount == 0)
-              _buildEmptyState(context, sessionService)
+            if (count == 0)
+              const _EmptyAccounts()
             else
-              ...otherAccounts.map(
-                (account) => _buildAccountTile(
-                  context,
-                  account,
-                  sessionService,
-                  isCurrent:
-                      false, /// Always false since we filtered out current
+              for (final account in otherAccounts)
+                _AccountTile(
+                  key: ValueKey(_identityOf(account)),
+                  account: account,
+                  onSwitch: () =>
+                      _switchAccount(context, account, sessionService),
+                  onRemove: () =>
+                      _removeAccount(context, account, sessionService),
                 ),
-              ),
-            _buildAddAccountButton(context),
+            const SizedBox(height: 4),
+            _AddAccountButton(current: current),
           ],
         );
       },
-    );
-  }
-
-  bool _isCurrentAccount(
-    Map<String, dynamic> account,
-    SessionService sessionService,
-  ) {
-    final currentSession = sessionService.currentSession;
-    if (currentSession == null) return false;
-
-    return account['userId']?.toString() == currentSession.userId.toString() &&
-        account['serverUrl'] == currentSession.serverUrl &&
-        account['database'] == currentSession.database;
-  }
-
-  Widget _buildEmptyState(BuildContext context, SessionService sessionService) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: Theme.of(context).primaryColor.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: HugeIcon(
-              icon:
-              HugeIcons.strokeRoundedUserAdd01,
-              size: 30,
-              color: Theme.of(context).primaryColor,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No Other Accounts',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white : Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Add multiple accounts to switch between them quickly',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: isDark ? Colors.grey[400] : Colors.grey[600],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAccountTile(
-    BuildContext context,
-    Map<String, dynamic> account,
-    SessionService sessionService, {
-    required bool isCurrent,
-  }) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: isCurrent
-            ? (isDark ? Colors.blue[900]!.withOpacity(0.3) : Colors.blue[50])
-            : (isDark ? Colors.grey[800] : Colors.grey[50]),
-        border: Border.all(
-          color: isCurrent
-              ? (isDark ? Colors.blue[700]! : Colors.blue[300]!)
-              : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
-          width: isCurrent ? 2 : 1,
-        ),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: _buildUserAvatar(account, isCurrent, isDark),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                account['userName'] ?? 'Unknown User',
-                style: TextStyle(
-                  color: isDark ? Colors.white : Colors.black87,
-                  fontSize: 14,
-                  fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w500,
-                ),
-              ),
-            ),
-            if (isCurrent)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.blue[700] : Colors.blue[600],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.check_circle, size: 14, color: Colors.white),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Current',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            Text(
-              account['database'] ?? 'Unknown Database',
-              style: TextStyle(
-                color: isDark ? Colors.grey[400] : Colors.grey[600],
-                fontSize: 12,
-              ),
-            ),
-            if (!isCurrent &&
-                (account['needsReauth']?.toString() == 'true' ||
-                    account['password']?.toString().isEmpty == true))
-              Row(
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    size: 12,
-                    color: Colors.orange[600],
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Needs re-authentication',
-                    style: TextStyle(
-                      color: Colors.orange[600],
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-          ],
-        ),
-        trailing: isCurrent
-            ? null:InkWell(
-          onTap:  isCurrent
-              ? null
-              : () async {
-            await _switchAccount(context, account, sessionService);
-          },
-          child: Container(
-            padding: EdgeInsets.all(10),
-            child: Text("Switch",style: TextStyle(
-                color: primaryColor,
-                fontWeight: FontWeight.w500,
-                fontSize: 13
-            ),),
-          ),
-        ),
-
-
-      ),
-    );
-  }
-
-  Widget _buildAddAccountButton(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: () {
-
-          /// Use current session's server URL and database like sales_app1
-          final sessionService = Provider.of<SessionService>(
-            context,
-            listen: false,
-          );
-
-
-          final current = sessionService.currentSession;
-
-          Navigator.push(context, dynamicRoute(context, ServerSetupScreen(isAddingAccount: true,)));
-        },
-        icon: const HugeIcon(icon:HugeIcons.strokeRoundedUserAdd01, size: 18),
-        label: const Text('Add Account'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Theme.of(context).primaryColor,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 16),
-        ),
-      ),
     );
   }
 
@@ -284,86 +106,246 @@ class SwitchAccountWidget extends StatelessWidget {
     Map<String, dynamic> account,
     SessionService sessionService,
   ) async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    /// Check if account needs re-authentication
-    final needsReauth = account['needsReauth']?.toString() == 'true';
-    final hasEmptyPassword = account['password']?.toString().isEmpty == true;
-
-    if (needsReauth || hasEmptyPassword) {
-
-      Navigator.push(
-        context,
-        dynamicRoute(
-          context,
-          CredentialsScreen(
-            url: account['serverUrl'] ?? '',
-            database: account['database'] ?? '',
-            prefilledUsername: account['username'] ?? account['userName'],
-          ),
-        ),
-      );
+    final password = await sessionService.retrievePasswordWithMultiplePatterns(
+      account,
+    );
+    if (!context.mounted) return;
+    if (password == null || password.isEmpty) {
+      _openSignIn(context, account);
       return;
     }
 
-    /// Show loading dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => Dialog(
-        backgroundColor: isDark ? Colors.grey[900] : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: Theme.of(context).primaryColor),
-              const SizedBox(height: 16),
-              Text(
-                'Switching Account...',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-              ),
-            ],
+    final biometricContext = BiometricContextService();
+    biometricContext.startAccountOperation('account_switch');
+
+    LoadingDialog.show(context, message: 'Switching account…');
+    final result = await _performSwitch(account, password, sessionService);
+    if (context.mounted) LoadingDialog.hide(context);
+
+    if (!context.mounted) {
+      biometricContext.endAccountOperation('account_switch');
+      return;
+    }
+
+    switch (result.outcome) {
+      case _SwitchOutcome.switched:
+        context.read<HomeProvider>().clearProvider();
+        context.read<ProfileProvider>().resetState();
+        Navigator.of(context).pushAndRemoveUntil(
+          dynamicRoute(context, const AppEntry()),
+          (_) => false,
+        );
+        biometricContext.endAccountOperation('account_switch');
+
+      case _SwitchOutcome.twoFactorRequired:
+        // TotpPage manages an operation named 'add_account' (it ends that
+        // name on success and, as a back-out safety net, in its own
+        // dispose()) — handing off under 'account_switch' instead would
+        // leave that name in the active list forever, permanently disabling
+        // the biometric lock.
+        biometricContext.endAccountOperation('account_switch');
+        biometricContext.startAccountOperation('add_account');
+        final rejection = await Navigator.push<TotpRejection>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TotpPage(
+              serverUrl: account['serverUrl']?.toString() ?? '',
+              database: account['database']?.toString() ?? '',
+              username: _loginOf(account),
+              password: password,
+              addaccount: true,
+            ),
           ),
+        );
+        if (!context.mounted) return;
+        switch (rejection) {
+          case TotpModuleMissing():
+            await showModuleMissingDialog(context, actionLabel: 'OK');
+          case TotpPortalUser(:final message):
+            await showAccessDeniedDialog(context, message: message);
+          case TotpDatabaseExpired():
+            CustomSnackbar.showError(context, DatabaseExpiredException.message);
+          case TotpNoEventAccess():
+            await showAccessDeniedDialog(
+              context,
+              denial: AccessDenial.noEventAccess,
+            );
+          case null:
+            break;
+        }
+
+      case _SwitchOutcome.needsSignIn:
+        biometricContext.endAccountOperation('account_switch');
+        _openSignIn(context, account);
+
+      case _SwitchOutcome.moduleMissing:
+        biometricContext.endAccountOperation('account_switch');
+        await showModuleMissingDialog(context, actionLabel: 'OK');
+
+      case _SwitchOutcome.portalUser:
+        biometricContext.endAccountOperation('account_switch');
+        await showAccessDeniedDialog(
+          context,
+          message: result.message ?? PortalUserException.portalUserMessage,
+        );
+
+      case _SwitchOutcome.databaseExpired:
+        biometricContext.endAccountOperation('account_switch');
+        CustomSnackbar.showError(
+          context,
+          result.message ?? DatabaseExpiredException.message,
+        );
+
+      case _SwitchOutcome.noEventAccess:
+        biometricContext.endAccountOperation('account_switch');
+        await showAccessDeniedDialog(
+          context,
+          denial: AccessDenial.noEventAccess,
+        );
+
+      case _SwitchOutcome.failed:
+        biometricContext.endAccountOperation('account_switch');
+        await showBlockingNoticeDialog(
+          context,
+          title: 'Switch Failed',
+          message:
+              result.message ??
+              'Failed to switch account. Please try again or re-add this '
+                  'account.',
+        );
+    }
+  }
+
+  /// Makes [account] the active session, or reports why it couldn't.
+  ///
+  /// Whatever happens, a failure leaves the account that was active when the
+  /// user tapped Switch in place — nothing here may leave the app signed in
+  /// as one account while the screen still shows another.
+  Future<_SwitchResult> _performSwitch(
+    Map<String, dynamic> account,
+    String password,
+    SessionService sessionService,
+  ) async {
+    final previousSession = sessionService.currentSession;
+
+    Future<void> rollback() async {
+      if (previousSession != null) {
+        await OdooSessionManager.updateSession(previousSession);
+      }
+    }
+
+    try {
+      // Reinstating the saved session cookie is tried first: a fresh
+      // password login makes Odoo re-issue its 2FA challenge even for an
+      // account that already passed it, and the cookie avoids asking for the
+      // code again. It falls back to a full login (and, if needed, the code
+      // screen) when there is no saved cookie or the server has dropped it.
+      AppSessionData? newSession;
+      final restored = sessionService.buildSessionFromStoredAccount(
+        account,
+        password,
+      );
+      if (restored != null) {
+        await sessionService.updateSessionDirectly(restored);
+        if (await sessionService.isRestoredSessionLive(restored.userId)) {
+          // A reinstated cookie never goes through `authenticate()`, so it
+          // needs its own expiry check. The catch below puts the previous
+          // account back before this surfaces.
+          final client = await OdooSessionManager.getClientEnsured();
+          if (await DatabaseExpiry.isExpired(client)) {
+            throw const DatabaseExpiredException();
+          }
+          newSession = restored;
+        } else {
+          // Put the previous account back before the login below runs any
+          // RPCs, so they are never scoped to a session that is gone.
+          await rollback();
+        }
+      }
+
+      newSession ??= await OdooSessionManager.authenticate(
+        serverUrl: account['serverUrl']?.toString() ?? '',
+        database: account['database']?.toString() ?? '',
+        username: _loginOf(account),
+        password: password,
+      );
+      if (newSession == null) {
+        await rollback();
+        return (outcome: _SwitchOutcome.needsSignIn, message: null);
+      }
+
+      final client = await OdooSessionManager.getClientEnsured();
+      if (!await isEventModuleInstalled(client)) {
+        await rollback();
+        return (outcome: _SwitchOutcome.moduleMissing, message: null);
+      }
+
+      // A saved account can lose its Event role on the server after it was
+      // added, so this is asked on every switch, not only when adding.
+      if (!await hasEventAccess(client)) {
+        await rollback();
+        return (outcome: _SwitchOutcome.noEventAccess, message: null);
+      }
+
+      final switched = newSession.copyWith(
+        selectedCompanyId: newSession.companyId,
+      );
+      await OdooSessionManager.updateSession(switched);
+      sessionService.updateSession(switched);
+
+      // A switch onto a restored cookie never otherwise goes through
+      // `storeAccount`, so its switcher entry (name, avatar, the cookie
+      // itself) would go stale.
+      await sessionService.storeAccount(switched, password);
+      return (outcome: _SwitchOutcome.switched, message: null);
+    } catch (e) {
+      await rollback();
+
+      // By type, ahead of every check below: the message says "database",
+      // and the classifier's text matching must never get to read it.
+      if (e is DatabaseExpiredException) {
+        return (
+          outcome: _SwitchOutcome.databaseExpired,
+          message: DatabaseExpiredException.message,
+        );
+      }
+      if (isTwoFactorError(e)) {
+        return (outcome: _SwitchOutcome.twoFactorRequired, message: null);
+      }
+      if (e is PortalUserException) {
+        return (outcome: _SwitchOutcome.portalUser, message: e.message);
+      }
+      if (classifyAuthFailure(e) == AuthFailure.invalidCredentials) {
+        // The stored password no longer works (changed on the server).
+        return (outcome: _SwitchOutcome.needsSignIn, message: null);
+      }
+      return (
+        outcome: _SwitchOutcome.failed,
+        message: authFailureMessage(
+          e,
+          fallback:
+              'Failed to switch account. Please try again or re-add this '
+              'account.',
+        ),
+      );
+    }
+  }
+
+  /// No usable stored password — never saved, or changed on the server — so
+  /// it has to be typed again. The sign-in screen restores the current
+  /// account if that attempt fails, so opening it is always safe.
+  void _openSignIn(BuildContext context, Map<String, dynamic> account) {
+    Navigator.push(
+      context,
+      dynamicRoute(
+        context,
+        CredentialsScreen(
+          url: account['serverUrl']?.toString() ?? '',
+          database: account['database']?.toString() ?? '',
+          prefilledUsername: _loginOf(account),
         ),
       ),
     );
-
-    try {
-      await _performDirectAccountSwitch(context, account, sessionService);
-    } catch (e) {
-      if (context.mounted) {
-        Navigator.pop(context); /// Close loading dialog
-
-        /// Handle re-authentication case
-        if (e.toString().toLowerCase().contains('authentication') ||
-            e.toString().toLowerCase().contains('password') ||
-            e.toString().toLowerCase().contains('credentials')) {
-          Navigator.push(
-            context,
-            dynamicRoute(
-              context,
-              CredentialsScreen(
-                url: account['serverUrl'] ?? '',
-                database: account['database'] ?? '',
-                prefilledUsername: account['username'] ?? account['userName'],
-              ),
-            ),
-          );
-        } else {
-          _showErrorDialog(
-            context,
-            'Switch Failed',
-            _parseAccountSwitchError(e.toString()),
-          );
-        }
-      }
-    }
   }
 
   Future<void> _removeAccount(
@@ -371,350 +353,430 @@ class SwitchAccountWidget extends StatelessWidget {
     Map<String, dynamic> account,
     SessionService sessionService,
   ) async {
+    final name = _displayNameOf(account);
+    final confirmed = await CommonDialog.confirm(
+      context,
+      title: 'Remove Account',
+      message:
+          'Remove $name from your saved accounts? You can add it again at '
+          'any time.',
+      confirmText: 'Remove',
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    // Matched on the full identity, not the user id alone: the same id is
+    // routinely reused across servers and databases (every admin is 2).
+    final identity = _identityOf(account);
+    final index = sessionService.storedAccounts.indexWhere(
+      (stored) => _identityOf(stored) == identity,
+    );
+    if (index == -1) return;
+
+    await sessionService.removeStoredAccount(index);
+    if (!context.mounted) return;
+    CustomSnackbar.show(
+      context: context,
+      title: 'Success',
+      message: 'Account $name removed',
+      type: SnackbarType.success,
+    );
+  }
+}
+
+/// Whether [account] (a stored switcher record) is the session [session].
+bool _isAccountOf(Map<String, dynamic> account, AppSessionData session) {
+  return account['userId']?.toString() == session.userId.toString() &&
+      account['database']?.toString() == session.database &&
+      _sameServer(account['serverUrl']?.toString(), session.serverUrl);
+}
+
+/// Compares server URLs the way the rest of the login flow treats them —
+/// ignoring case and a trailing slash — so the active account is never
+/// listed as an "other" account just because it was saved with a slash.
+bool _sameServer(String? a, String? b) {
+  String normalize(String? url) {
+    var value = (url ?? '').trim().toLowerCase();
+    while (value.endsWith('/')) {
+      value = value.substring(0, value.length - 1);
+    }
+    return value;
+  }
+
+  return normalize(a) == normalize(b);
+}
+
+String _identityOf(Map<String, dynamic> account) =>
+    '${account['userId']}|${account['serverUrl']}|${account['database']}';
+
+/// The login to authenticate with. `userName` is the display name, not a
+/// login, so it is never used here.
+String _loginOf(Map<String, dynamic> account) =>
+    account['username']?.toString() ?? account['email']?.toString() ?? '';
+
+String _displayNameOf(Map<String, dynamic> account) {
+  for (final key in const ['userName', 'name', 'username']) {
+    final value = account[key]?.toString().trim() ?? '';
+    if (value.isNotEmpty) return value;
+  }
+  return 'Unknown User';
+}
+
+class _EmptyAccounts extends StatelessWidget {
+  const _EmptyAccounts();
+
+  @override
+  Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? Colors.grey[900] : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Remove Account',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : Colors.black87,
-          ),
-        ),
-        content: Text(
-          'Are you sure you want to remove ${account['userName']} from your saved accounts?',
-          style: TextStyle(color: isDark ? Colors.grey[300] : Colors.grey[700]),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: isDark ? Colors.grey[400] : Colors.grey[600],
-              ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const HugeIcon(
+              icon: HugeIcons.strokeRoundedUserAdd01,
+              size: 22,
+              color: AppTheme.primaryColor,
             ),
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red[600],
-              foregroundColor: Colors.white,
+          const SizedBox(height: 12),
+          Text(
+            'No Other Accounts',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : AppTheme.textPrimary,
             ),
-            child: const Text('Remove'),
           ),
+          const SizedBox(height: 6),
+          Text(
+            'Add multiple accounts to switch between them quickly',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white60 : Colors.black54,
+            ),
+          ),
+          const SizedBox(height: 12),
         ],
       ),
     );
+  }
+}
 
-    if (confirmed == true) {
-      final accountIndex = sessionService.storedAccounts.indexWhere(
-        (stored) => stored['userId'] == account['userId'],
-      );
+class _AccountTile extends StatefulWidget {
+  const _AccountTile({
+    super.key,
+    required this.account,
+    required this.onSwitch,
+    required this.onRemove,
+  });
 
-      if (accountIndex != -1) {
-        await sessionService.removeStoredAccount(accountIndex);
-        if (context.mounted) {
-          CustomSnackbar.show(
-            context: context,
-            title: 'Success',
-            message: 'Account ${account['userName']} removed',
-            type: SnackbarType.success,
-          );
-        }
-      }
+  final Map<String, dynamic> account;
+  final Future<void> Function() onSwitch;
+  final VoidCallback onRemove;
+
+  @override
+  State<_AccountTile> createState() => _AccountTileState();
+}
+
+class _AccountTileState extends State<_AccountTile> {
+  /// Whether a password is stored for this account; null while that is being
+  /// looked up. Without one, switching means typing the password again.
+  bool? _hasPassword;
+
+  /// Guards against a second tap starting a second switch while the first
+  /// is still on its way to showing the loading dialog.
+  bool _switching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _lookUpPassword();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AccountTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.account, widget.account)) _lookUpPassword();
+  }
+
+  Future<void> _lookUpPassword() async {
+    final password = await SessionService.instance
+        .retrievePasswordWithMultiplePatterns(widget.account);
+    if (!mounted) return;
+    setState(() => _hasPassword = password != null && password.isNotEmpty);
+  }
+
+  Future<void> _handleSwitch() async {
+    if (_switching) return;
+    _switching = true;
+    try {
+      await widget.onSwitch();
+    } finally {
+      _switching = false;
     }
   }
 
-  Widget _buildUserAvatar(
-    Map<String, dynamic> account,
-    bool isCurrent,
-    bool isDark,
-  ) {
-    final serverUrl = account['serverUrl'] as String?;
-    final userId = account['userId'];
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final account = widget.account;
+    final database = account['database']?.toString() ?? '';
+    final host = Uri.tryParse(account['serverUrl']?.toString() ?? '')?.host;
+    final needsSignIn = _hasPassword == false;
 
     return Container(
-      width: 40,
-      height: 40,
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.grey[850] : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _handleSwitch,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 0, 10),
+            child: Row(
+              children: [
+                _AccountAvatar(account: account),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _displayNameOf(account),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : AppTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        host == null || host.isEmpty
+                            ? database
+                            : '$database',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.grey[400] : Colors.grey[600],
+                        ),
+                      ),
+                      if (needsSignIn) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.warning_amber_rounded,
+                              size: 12,
+                              color: StatusColors.orange,
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                'Needs re-authentication',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: StatusColors.orange,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+
+                PopupMenuButton<String>(
+                  position: PopupMenuPosition.under,
+                  icon: Icon(
+                    Icons.more_vert,
+                    size: 20,
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                  onSelected: (value) {
+                    if (value == 'remove') widget.onRemove();
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem<String>(
+                      value: 'remove',
+                      child: Text(
+                        'Remove',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AccountAvatar extends StatelessWidget {
+  const _AccountAvatar({required this.account});
+
+  final Map<String, dynamic> account;
+
+  static const double _size = 40;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      width: _size,
+      height: _size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(
           color: isDark ? Colors.grey[600]! : Colors.grey[300]!,
-          width: 2,
+          width: 1.5,
         ),
       ),
-      child: ClipOval(
-        child: _buildAvatarImage(serverUrl, userId, isCurrent, isDark, account),
-      ),
+      child: ClipOval(child: _image(isDark)),
     );
   }
 
-  Widget _buildAvatarImage(
-    String? serverUrl,
-    dynamic userId,
-    bool isCurrent,
-    bool isDark, [
-    Map<String, dynamic>? account,
-  ]) {
-    /// Prefer stored base64 image if available
-    final imageBase64 = account != null
-        ? account['imageBase64'] as String?
-        : null;
+  Widget _image(bool isDark) {
+    final fallback = _Initials(account: account, isDark: isDark);
+
+    final imageBase64 = account['imageBase64']?.toString();
     if (imageBase64 != null && imageBase64.isNotEmpty) {
       try {
         return Image.memory(
-          const Base64Decoder().convert(imageBase64),
+          base64Decode(imageBase64),
           fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return CircleAvatar(
-              radius: 34,
-              backgroundColor: isDark ? Colors.grey[700] : Colors.grey[300],
-              child: HugeIcon(
-                icon: HugeIcons.strokeRoundedUserCircle,
-                size: 30,
-                color: isDark ? Colors.grey[500] : Colors.grey[600],
-              ),
-            );
-          },
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => fallback,
         );
-      } catch (e) {
+      } catch (_) {
+        // Malformed data falls through to the server copy.
       }
     }
 
-    if (serverUrl == null || userId == null) {
-      return _buildDefaultAvatar(isCurrent, isDark, account);
+    final serverUrl = account['serverUrl']?.toString();
+    final userId = account['userId']?.toString();
+    if (serverUrl == null || serverUrl.isEmpty || userId == null) {
+      return fallback;
     }
 
-    /// Try avatar URL
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final avatarUrl =
-        '$serverUrl/web/image?model=res.users&id=$userId&field=image_128&unique=$timestamp';
-
+    // A stable URL, so the image is served from cache on every rebuild
+    // rather than re-downloaded each time the switcher repaints.
     return CachedNetworkImage(
-      imageUrl: avatarUrl,
+      imageUrl:
+          '$serverUrl/web/image?model=res.users&id=$userId&field=image_128',
       fit: BoxFit.cover,
       fadeInDuration: const Duration(milliseconds: 200),
-      placeholder: (context, url) {
-        return Container(
-          color: isDark ? Colors.grey[700] : Colors.grey[100],
-          child: HugeIcon(
-            icon:
-            HugeIcons.strokeRoundedUser,
-            size: 20,
-            color: isDark ? Colors.grey[400] : Colors.grey[600],
-          ),
-        );
-      },
-      errorWidget: (context, url, error) {
-        return _buildDefaultAvatar(isCurrent, isDark, account);
-      },
+      placeholder: (_, _) => fallback,
+      errorWidget: (_, _, _) => fallback,
     );
   }
+}
 
-  Widget _buildDefaultAvatar(
-    bool isCurrent,
-    bool isDark, [
-    Map<String, dynamic>? account,
-  ]) {
-    final userName = account?['userName'] as String?;
-    if (userName != null && userName.isNotEmpty) {
-      final initials = _getUserInitials(userName);
-      return Container(
-        color: isDark ? Colors.grey[700] : Colors.grey[100],
-        child: Center(
-          child: Text(
-            initials,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.grey[300] : Colors.grey[700],
-            ),
-          ),
-        ),
-      );
-    }
+class _Initials extends StatelessWidget {
+  const _Initials({required this.account, required this.isDark});
+
+  final Map<String, dynamic> account;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = _displayNameOf(
+      account,
+    ).split(RegExp(r'\s+')).where((part) => part.isNotEmpty).toList();
+    final initials = parts.isEmpty
+        ? 'U'
+        : parts.take(2).map((part) => part[0].toUpperCase()).join();
 
     return Container(
-      color: isDark ? Colors.grey[700] : Colors.grey[100],
-      child: HugeIcon(
-        icon:
-        HugeIcons.strokeRoundedUser,
-        size: 20,
-        color: isDark ? Colors.grey[400] : Colors.grey[600],
+      color: isDark ? Colors.grey[700] : Colors.grey[200],
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.grey[200] : Colors.grey[700],
+        ),
       ),
     );
   }
+}
 
-  String _getUserInitials(String userName) {
-    final parts = userName.trim().split(' ');
-    if (parts.length >= 2) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    } else if (parts.isNotEmpty && parts[0].isNotEmpty) {
-      return parts[0].substring(0, 1).toUpperCase();
-    }
-    return 'U';
-  }
+class _AddAccountButton extends StatelessWidget {
+  const _AddAccountButton({required this.current});
 
-  Future<void> _performDirectAccountSwitch(
-    BuildContext context,
-    Map<String, dynamic> account,
-    SessionService sessionService,
-  ) async {
-    final biometricContext = BiometricContextService();
-    biometricContext.startAccountOperation('account_switch');
+  /// The active session, whose server and database the new account starts
+  /// from — adding a second account on the same server is the common case.
+  final AppSessionData? current;
 
-    try {
-      String? password;
-
-      final username =
-          account['username']?.toString() ?? account['userName']?.toString();
-
-      /// Try to retrieve password
-      password = await sessionService.retrievePasswordWithMultiplePatterns(
-        account,
-      );
-
-      if (password == null || password.isEmpty) {
-        throw Exception('No password found for account');
-      }
-
-      final newSession = await OdooSessionManager.authenticate(
-        serverUrl: account['serverUrl'],
-        database: account['database'],
-        username: username ?? '',
-        password: password,
-      );
-      if (newSession == null) throw Exception('Authentication failed');
-
-      if (newSession != null) {
-        final client = await OdooSessionManager.getClientEnsured();
-
-
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          context.read<CompanyProvider>().initialize();
-          context.read<ProfileProvider>().fetchUserProfile();
-
-        });
-
-
-        final userCompanies = await OdooSessionManager.getAllowedCompaniesList();
-        final selectedCompany = newSession.companyId;
-
-
-        final fixedSession = newSession.copyWith(
-          selectedCompanyId: selectedCompany,
-          allowedCompanyIds: newSession.allowedCompanyIds,
-        );
-
-        /// Save corrected session
-        await fixedSession.saveToPrefs();
-        await OdooSessionManager.updateSession(fixedSession);
-        sessionService.updateSession(fixedSession);
-
-        if (context.mounted) {
-          Navigator.pop(context);
-          Navigator.pushAndRemoveUntil(
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: ElevatedButton.icon(
+        onPressed: () {
+          Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const AppEntry()),
-                (_) => false,
+            dynamicRoute(
+              context,
+              ServerSetupScreen(
+                isAddingAccount: true,
+                initialUrl: current?.serverUrl,
+                initialDatabase: current?.database,
+              ),
+            ),
           );
-
-          biometricContext.endAccountOperation('account_switch');
-        }
-      } else {
-        throw Exception('Authentication failed');
-      }
-    } catch (e) {
-      biometricContext.endAccountOperation('account_switch');
-      rethrow;
-    }
-  }
-
-  String _parseAccountSwitchError(String error) {
-    final errorLower = error.toLowerCase();
-
-    if (errorLower.contains('access denied') ||
-        errorLower.contains('invalid login') ||
-        errorLower.contains('authentication failed') ||
-        errorLower.contains('wrong login/password') ||
-        errorLower.contains('invalid username or password') ||
-        errorLower.contains('login failed')) {
-      return 'Authentication failed. This account may need re-authentication.';
-    }
-
-    if (errorLower.contains('database') && errorLower.contains('not found')) {
-      return 'Database not found. Please check your server configuration.';
-    }
-
-    if (errorLower.contains('connection') ||
-        errorLower.contains('network') ||
-        errorLower.contains('timeout') ||
-        errorLower.contains('unreachable')) {
-      return 'Unable to connect to server. Please check your internet connection.';
-    }
-
-    if (errorLower.contains('500') ||
-        errorLower.contains('internal server error')) {
-      return 'Server error occurred. Please try again later.';
-    }
-
-    if (errorLower.contains('permission') || errorLower.contains('access')) {
-      return 'Access denied. Please check your user permissions.';
-    }
-
-    return 'Failed to switch account. Please try again or re-add this account.';
-  }
-
-  void _showErrorDialog(BuildContext context, String title, String message) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: isDark ? Colors.grey[900] : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.error_outline_rounded,
-                size: 24,
-                color: Colors.red.shade400,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 18,
-                ),
-              ),
-            ),
-          ],
+        },
+        icon: const HugeIcon(
+          icon: HugeIcons.strokeRoundedUserAdd01,
+          size: 18,
+          color: AppTheme.white,
         ),
-        content: Text(
-          message,
-          style: const TextStyle(fontSize: 15, height: 1.5),
+        label: const Text(
+          'Add Account',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Close'),
+        style: ElevatedButton.styleFrom(
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          backgroundColor: AppTheme.primaryColor,
+          foregroundColor: AppTheme.white,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
-        ],
+        ),
       ),
     );
   }

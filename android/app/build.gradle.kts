@@ -29,10 +29,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.cybrosys.mobo_event"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -50,7 +47,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // TODO: switch back to signingConfigs.getByName("release") once android/key.properties
+            // and a real release keystore are in place — debug signing is a temporary stand-in.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }

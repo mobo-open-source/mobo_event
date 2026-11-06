@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
+import '../../../core/theme/app_theme.dart';
 
 enum ShimmerType {
   standard,
@@ -29,19 +30,11 @@ class ListShimmer {
           color: cardBg,
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
-            BoxShadow(
-              color: isDark
-                  ? Colors.black.withOpacity(0.3)
-                  : Colors.black.withOpacity(0.05),
-              blurRadius: 4,
-              spreadRadius: 1,
-              offset: const Offset(0, 2),
-            ),
+            AppShadows.cardShadow,
           ],
         ),
         child: Row(
           children: [
-            /// Avatar/Icon shimmer
             Container(
               width: 56,
               height: 56,
@@ -51,7 +44,6 @@ class ListShimmer {
               ),
             ),
             const SizedBox(width: 16),
-            /// Content shimmer
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -86,7 +78,6 @@ class ListShimmer {
               ),
             ),
             const SizedBox(width: 16),
-            /// Status/Amount shimmer
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -294,7 +285,6 @@ class ListShimmer {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            /// Group header shimmer
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Shimmer.fromColors(
@@ -332,7 +322,6 @@ class ListShimmer {
                 ),
               ),
             ),
-            // Group items shimmer
             ...List.generate(itemsPerGroup, (itemIndex) {
               switch (type) {
                 case ShimmerType.product:

@@ -9,6 +9,15 @@ class AttendeeShortModel {
   final String? eventTicketName;
   final String barcode;
 
+  /// What the attendee lists' Group By buckets on. The ids are null — and the
+  /// names null or empty — where the field is unset on the registration (Odoo
+  /// sends `false`).
+  final int? eventTicketId;
+  final int? slotId;
+  final int? partnerId;
+  final String? partnerName;
+  final DateTime? createDate;
+
   AttendeeShortModel({
     required this.id,
     required this.name,
@@ -19,7 +28,18 @@ class AttendeeShortModel {
     this.eventTicketName,
     required this.state,
     required this.barcode,
+    this.eventTicketId,
+    this.slotId,
+    this.partnerId,
+    this.partnerName,
+    this.createDate,
   });
+
+  /// `create_date` arrives as UTC text, `2026-10-01 09:30:00`.
+  static DateTime? _dateTimeOrNull(dynamic value) {
+    if (value is! String || value.isEmpty) return null;
+    return DateTime.tryParse('${value.replaceFirst(' ', 'T')}Z')?.toLocal();
+  }
 
   static String? _stringOrNull(dynamic value) {
     if (value == null || value == false) return '';
@@ -54,6 +74,11 @@ class AttendeeShortModel {
       eventTicketName: _many2oneName(json['event_ticket_id']),
       barcode: json['barcode'],
       state: _stringOrNull(json['state']) ?? '',
+      eventTicketId: _many2oneId(json['event_ticket_id']),
+      slotId: _many2oneId(slot),
+      partnerId: _many2oneId(json['partner_id']),
+      partnerName: _many2oneName(json['partner_id']),
+      createDate: _dateTimeOrNull(json['create_date']),
     );
   }
 }

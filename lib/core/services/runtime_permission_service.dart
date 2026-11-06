@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../shared/widgets/dialogs/common_dialog.dart';
+
 class RuntimePermissionService {
   static Future<bool> requestMicrophonePermission(
     BuildContext context, {
@@ -65,22 +67,12 @@ class RuntimePermissionService {
     String title,
     String message,
   ) async {
-    final shouldOpenSettings = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Not Now'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
+    final shouldOpenSettings = await CommonDialog.confirm(
+      context,
+      title: title,
+      message: message,
+      confirmText: 'Open Settings',
+      cancelText: 'Not Now',
     );
 
     if (shouldOpenSettings == true) {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../../core/const/app_colors.dart';
+import 'package:hugeicons/hugeicons.dart';
 import '../model/event_question.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/section_list_state.dart';
 
 class QuestionCard extends StatelessWidget {
   final EventQuestion question;
@@ -35,76 +37,49 @@ class QuestionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // The bordered, shadow-less row the Tickets, Communication and Questions
+    // lists share (see [SectionCard]).
+    return SectionCard(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.grey.shade300),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 0, 0, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      question.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                  if (onDelete != null)
-                    PopupMenuButton<String>(
-                      padding: EdgeInsets.zero,
-                      color: Colors.white,
-                      icon: const Icon(
-                        Icons.more_vert,
-                        size: 20,
-                        color: Colors.grey,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      onSelected: (value) {
-                        if (value == 'delete') onDelete?.call();
-                      },
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Row(
-                            children: [
-                              Icon(Icons.delete, size: 18, color: Colors.red),
-                              SizedBox(width: 10),
-                              Text('Delete'),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-
-            ],
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          HugeIcon(
+            icon: HugeIcons.strokeRoundedMessageQuestion,
+            size: 22,
+            color: AppTheme.secondaryLabelColor(isDark),
           ),
-        ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  question.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimaryOn(isDark),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  getTypeLabel(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.secondaryLabelColor(isDark),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onDelete != null) SectionDeleteButton(onPressed: onDelete!),
+        ],
       ),
     );
   }

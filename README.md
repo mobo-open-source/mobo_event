@@ -1,138 +1,188 @@
 # Mobo Event
 
-![Flutter](https://img.shields.io/badge/Flutter-%2302569B.svg?style=for-the-badge&logo=Flutter&logoColor=white)
-![Dart](https://img.shields.io/badge/Dart-0175C2?style=for-the-badge&logo=dart&logoColor=white)
-![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
-![iOS](https://img.shields.io/badge/iOS-000000?style=for-the-badge&logo=ios&logoColor=white)
-![Odoo](https://img.shields.io/badge/Odoo-714B67?style=for-the-badge&logo=odoo&logoColor=white)
-![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=for-the-badge)
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
+[![Dart](https://img.shields.io/badge/Dart-3.x-0175C2?style=for-the-badge&logo=dart&logoColor=white)](https://dart.dev)
+[![Android](https://img.shields.io/badge/Android-Success-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://www.android.com)
+[![iOS](https://img.shields.io/badge/iOS-Success-000000?style=for-the-badge&logo=apple&logoColor=white)](https://www.apple.com/ios)
+[![Odoo](https://img.shields.io/badge/Odoo-17%2B-714B67?style=for-the-badge&logo=odoo&logoColor=white)](https://www.odoo.com)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 
+**Mobo Event** is an enterprise-grade mobile application designed for professional event management. Deeply integrated with the **Odoo ERP** ecosystem, it provides a high-performance interface for tracking registrations, managing attendees, and handling complex ticketing workflows directly from Android and iOS devices.
 
-Mobo Event is a powerful mobile solution designed to seamlessly integrate with Odoo, empowering businesses to manage their events, registrations, and attendees with efficiency and precision. Built with Flutter, it offers a high-performance, intuitive interface for organizing events, tracking registrations, and managing tickets directly from your mobile device.
+---
 
-## Key Features
+## Visual Showcase
 
-### Comprehensive Event Management
-- **Real-Time Event Tracking**: Monitor event status, sessions, and schedules across your organization instantly.
-- **Event Creation & Editing**: Create new events with detailed information including dates, venues, ticket types, and descriptions.
-- **Calendar View**: Visualize events with an integrated calendar for easy scheduling and slot management.
-
-### Registration & Attendee Management
-- **Attendee Tracking**: Manage event registrations and track attendee details in real time.
-- **QR Code Scanning**: Quick check-in of attendees using integrated barcode and QR code scanning.
-- **Registration Forms**: Dynamic registration forms with customizable questions and answers.
-
-### Ticket Management
-- **Ticket Creation**: Create and manage multiple ticket types per event with pricing and seat limits.
-- **Ticket Sales Monitoring**: Track ticket availability and sales performance.
-
-### Communication & Scheduling
-- **Email Scheduler**: Schedule and send communications to attendees directly from the app.
-- **Template Management**: Use email templates for consistent attendee communication.
-- **Activity Scheduling**: Schedule and manage activities within events with timeline tracking.
-
-### Questions & Surveys
-- **Event Questions**: Create and manage custom questions for event registrations.
-- **Answer Tracking**: Monitor and review attendee responses and feedback.
-
-### Security & User Experience
-- **Biometric Authentication**: Secure and fast login using fingerprint or Face ID.
-- **2-Factor Authentication (2FA)**: Support for Time-based One-Time Password (TOTP) for enhanced security.
-- **User Access Control**: Permission-based access governed by Odoo's user group settings.
-- **Switch Account**: Quickly swap between multiple Odoo accounts and databases.
-- **Multi-Company Support**: Easily switch between different company profiles.
-- **Dark Mode**: Fully optimized dark theme for comfortable usage.
-- **Performance**: Optimized with pagination and domain-based filtering for large datasets.
-
-## Screenshots
-
-
-
-<div>
-  <img src="assets/git/1.png" width="200" height="500" style="margin:8px;" />
-  <img src="assets/git/2.png" width="200" height="500" style="margin:8px;" />
-  <img src="assets/git/3.png" width="200" height="500" style="margin:8px;" />
-  <img src="assets/git/4.png" width="200" height="500" style="margin:8px;" />
+<div align="center">
+  <img src="assets/git/1.png" width="160" style="margin:10px" />
+  <img src="assets/git/2.png" width="160" style="margin:10px" />
+  <img src="assets/git/3.png" width="160" style="margin:10px" />
+  <img src="assets/git/4.png" width="160" style="margin:10px" />
+  <img src="assets/git/5.png" width="160" style="margin:10px" />
 </div>
 
+---
+
+## Core Features
+
+- **Real-Time Event Tracking**: Instant synchronization with Odoo for live event status and sessions.
+- **Precision Scanning**: High-fidelity QR and Barcode scanning powered by `mobile_scanner`.
+- **Advanced Ticketing**: Manage tiered ticket types, seat availability, and pricing dynamically.
+- **Enterprise Security**: Biometric authentication (FaceID/Fingerprint) and secure session handling.
+- **Dynamic Registration**: Support for customizable event questions and feedback forms.
+- **Multi-Tenant Architecture**: Seamless switching between multiple Odoo databases and companies.
+
+---
+
+## Project Architecture
+
+Mobo Event follows a strict **Feature-Driven** architectural pattern, optimized for scalability and modularity.
+
+### Directory Structure
+```text
+.
+├── android/            # Android native platform configuration
+├── ios/                # iOS native platform configuration
+├── assets/             # Global assets (Images, Lottie, Fonts, Icons)
+├── lib/                
+│   ├── app/            # App entry point, Main Scaffold, and Initializers
+│   ├── core/           # Infrastructure Layer
+│   │   ├── const/      # Universal constants (Colors, Typography)
+│   │   ├── services/   # Core engines (Odoo RPC, Auth, Session)
+│   │   ├── routing/    # Navigator 2.0 implementation
+│   │   └── theme/      # Dark & Light mode configurations
+│   ├── features/       # Business Logic Layer (Modular Features)
+│   │   ├── event/      # Event details and session logic
+│   │   ├── ticket/     # Ticketing and seat management
+│   │   └── ...         # modular login, registration, etc.
+│   ├── shared/         # Common UI components & reusable data/helpers
+│   └── main.dart       # Application entry point
+└── test/               # Comprehensive unit and integration tests
+```
+
+### Design Principles
+- **Modularity**: Every feature is self-contained with its own providers and services.
+- **Reactive State**: Powered by [Provider](https://pub.dev/packages/provider) for clean data flow.
+- **Clean Infrastructure**: Abstracted service layers isolate the UI from Odoo RPC complexities.
+
+---
 
 ## Technology Stack
 
-Mobo Event is built using modern technologies to ensure reliability and performance:
+| Category | Technology | Usage in Mobo Event |
+| :--- | :--- | :--- |
+| **Core Framework** | [Flutter](https://flutter.dev) (Dart) | Multi-platform native framework. |
+| **Backend Interface**| [Odoo RPC](https://pub.dev/packages/odoo_rpc) | Direct enterprise session & data management. |
+| **State Management**| [Provider](https://pub.dev/packages/provider) | Pragmatic and testable state management. |
+| **Authentication** | [Local Auth](https://pub.dev/packages/local_auth) | Enterprise biometric security layer. |
+| **Scanning** | [Mobile Scanner](https://pub.dev/packages/mobile_scanner) | High-speed QR/Barcode check-in system. |
+| **Graphics** | [Lottie](https://pub.dev/packages/lottie) | Vector-based micro-animations. |
+| **Typography** | [Google Fonts](https://pub.dev/packages/google_fonts) | Optimized cross-platform typography. |
+| **Local Storage** | [Secure Storage](https://pub.dev/packages/flutter_secure_storage) | Hardware-backed encrypted session storage. |
 
-- **Frontend**: Flutter (Dart)
-- **State Management**: Provider
-- **Backend Integration**: Odoo RPC
-- **Authentication**: Local Auth (Biometrics) & Odoo Session Management
-- **Calendar**: Table Calendar for event scheduling
-- **Scanning**: Mobile Scanner for QR/Barcode check-in
+---
 
-## Supported Odoo Versions
+## Configuration & Permissions
 
-Tested and verified on:
-- **Odoo version 17 - 19** (Community & Enterprise)
+### iOS Requirements
+Add the following to your `Info.plist`:
+- `NSCameraUsageDescription`: Required for scanning attendee tickets.
+- `NSFaceIDUsageDescription`: Required for biometric authentication.
+- `NSPhotoLibraryUsageDescription`: Required for picking event/profile images.
+
+### Android Requirements
+The app requires the following permissions in `AndroidManifest.xml`:
+- `INTERNET`: For Odoo server communication.
+- `CAMERA`: For QR code scanning.
+- `USE_BIOMETRIC`: For Fingerprint/FaceID login.
+
+---
 
 ## Getting Started
 
 ### Prerequisites
-- Flutter SDK (Latest Stable)
-- Odoo Instance (v17 or higher recommended)
-- Android Studio or VS Code
+- **Flutter SDK**: v3.19.0 or higher.
+- **Odoo Server**: v17.0+ (Community or Enterprise).
+- **Backend Setup**: Ensure the `event` and `website_event` modules are installed on your Odoo instance.
 
-### Installation
+### Installation & Run
 
-1. **Clone the repository**
+1. **Clone the project**
    ```bash
    git clone https://github.com/mobo-open-source/mobo_event.git
    cd mobo_event
    ```
 
-2. **Install dependencies**
+2. **Initialize Dependencies**
    ```bash
    flutter pub get
+   cd ios && pod install && cd ..
    ```
 
-3. **Run the application**
+3. **Launch**
    ```bash
    flutter run
    ```
 
-## Usage
+---
 
-To get started with Mobo Event:
+## Troubleshooting
 
-1. **Open the App**: Launch Mobo Event on your mobile device.
-2. **Setup Server**: Enter your Odoo server URL.
-3. **Select Database**: Choose the appropriate database for your company.
-4. **Login**: Enter your Odoo credentials (including 2FA if enabled).
-5. **Start Managing**: Begin managing your events, registrations, and attendees efficiently.
+- **Pod Install Failure**: Ensure your CocoaPods version is 1.15.0 or higher. Run `pod repo update` if dependencies are not found.
+- **Scanning Issues**: Verify the camera permission is enabled in the device settings.
+- **Sync Failure**: Ensure the Odoo server URL starts with `https://` (unless local testing) and is accessible from the mobile network.
+- **Login Issues**: Verify your database name and ensuring the user has Invoicing permissions in Odoo.
 
-## Roadmap
+---
 
-Future improvements planned for Mobo Event:
-- [ ] **Offline Support**: Enable work without internet with automatic synchronization.
-- [ ] **AI Support**: Intelligent event insights and optimized scheduling suggestions.
-- [ ] **Push Notifications**: Real-time alerts for new registrations and event updates.
+## Development Standards
+
+### Commit Message Convention
+To maintain a high-quality audit log, we follow the Mobo convention:
+- `[ADD]`: Adding new features or critical dependencies.
+- `[FIX]`: Resolving bugs or build issues.
+- `[UPDT]`: Updating existing code, themes, or documentation.
+
+### Code Quality
+Run the following before submitting any pull requests:
+```bash
+flutter analyze
+flutter test
+```
+
+---
+
+## Future Roadmap
+- [ ] **Offline Data Entry**: Queue registrations while offline for automatic sync.
+- [ ] **Advanced Analytics**: Interactive dashboards for event organizers.
+- [ ] **Push Notifications**: Integrated Odoo activity alerts.
+
+---
+
+##  Configuration
+1. **Server Setup**: Enter your Odoo Server URL and Database on the login screen.
+2. **Credentials**: Log in with your standard Odoo user credentials.
+3. **Company Selection**: Switch between allowed companies from the profile menu.
+
+---
 
 ## Contributing
+1. Fork the repo.
+2. Create your Feature Branch (`git checkout -b feature/CoolFeature`).
+3. Commit using our conventions (`git commit -m '[ADD] CoolFeature'`).
+4. Push to the branch.
+5. Create a Pull Request.
 
-We welcome contributions to improve Mobo Event!
-1. Fork the project.
-2. Create your feature branch (`git checkout -b feature/NewFeature`).
-3. Commit your changes (`git commit -m 'Add NewFeature'`).
-4. Push to the branch (`git push origin feature/NewFeature`).
-5. Open a Pull Request.
-
-## Maintainers
-
-**Team Mobo at Cybrosys Technologies**
-- [mobo@cybrosys.com](mailto:mobo@cybrosys.com)
+---
 
 ## License
+Licensed under the **Apache License 2.0**. See `LICENSE` for the full legal text.
 
-This project is primarily licensed under the Apache License 2.0.
-It also includes third-party components licensed under:
-- MIT License
-- GNU Lesser General Public License (LGPL)
+**Developed with by Team Mobo at [Cybrosys Technologies](https://www.cybrosys.com)**
 
-See the [LICENSE](LICENSE) file for the main license and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for details on included dependencies and their respective licenses.
+
+##  Maintainers
+**Team Mobo at Cybrosys Technologies**
+- Email: [mobo@cybrosys.com](mailto:mobo@cybrosys.com)
+- Website: [cybrosys.com](https://www.cybrosys.com/mobo/)
+# mobo_event_

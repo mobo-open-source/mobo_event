@@ -29,7 +29,15 @@ class SettingsProvider extends ChangeNotifier {
 
   String _selectedLanguage = 'en_US';
   String _selectedCurrency = 'USD';
-  String _selectedTimezone = 'UTC';
+
+  /// Mirrors `res.users.tz` of the signed-in Odoo user. Empty until the value
+  /// is known — Odoo itself leaves it blank when the user never picked one,
+  /// so there is deliberately no `'UTC'` default here.
+  String _selectedTimezone = '';
+
+  /// Prefs key tying the cached [_selectedTimezone] to the account it was read
+  /// for, so switching accounts never shows the previous account's timezone.
+  static const _timezoneOwnerKey = 'selected_timezone_owner';
 
   /// Getters
   bool get isLoading => _isLoading;
@@ -58,7 +66,7 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> initialize() async {
     await loadLocalSettings();
-    /// Fetch Language & Region data in background
+    // Fetch Language & Region data in background
     fetchAllLanguageRegionData();
   }
 
@@ -69,12 +77,17 @@ class SettingsProvider extends ChangeNotifier {
       _reduceMotion = prefs.getBool('reduce_motion') ?? false;
       _isDarkMode = prefs.getBool('dark_mode') ?? false;
 
-      /// Load Language & Region settings
       _selectedLanguage = prefs.getString('selected_language') ?? 'en_US';
       _selectedCurrency = prefs.getString('selected_currency') ?? 'USD';
-      _selectedTimezone = prefs.getString('selected_timezone') ?? 'UTC';
 
-      /// Load cached data
+      // Only trust the cached timezone if it was read for this very account;
+      // [fetchUserTimezone] then replaces it with Odoo's current value.
+      final owner = await _currentOwnerKey();
+      _selectedTimezone =
+          (owner != null && prefs.getString(_timezoneOwnerKey) == owner)
+          ? prefs.getString('selected_timezone') ?? ''
+          : '';
+
       final cachedLangs = prefs.getString('available_languages');
       final cachedCurrencies = prefs.getString('available_currencies');
       final cachedTimezones = prefs.getString('available_timezones');
@@ -101,7 +114,6 @@ class SettingsProvider extends ChangeNotifier {
         } catch (_) {}
       }
 
-      /// Load timestamps
       final langsTs = prefs.getInt('langs_updated_at');
       final currsTs = prefs.getInt('currs_updated_at');
       final tzTs = prefs.getInt('tz_updated_at');
@@ -130,12 +142,16 @@ class SettingsProvider extends ChangeNotifier {
       await prefs.setBool('reduce_motion', _reduceMotion);
       await prefs.setBool('dark_mode', _isDarkMode);
 
-      /// Save Language & Region settings
       await prefs.setString('selected_language', _selectedLanguage);
       await prefs.setString('selected_currency', _selectedCurrency);
       await prefs.setString('selected_timezone', _selectedTimezone);
+      final owner = await _currentOwnerKey();
+      if (owner != null) {
+        await prefs.setString(_timezoneOwnerKey, owner);
+      } else {
+        await prefs.remove(_timezoneOwnerKey);
+      }
 
-      /// Save cached data
       await prefs.setString(
         'available_languages',
         jsonEncode(_availableLanguages),
@@ -149,7 +165,6 @@ class SettingsProvider extends ChangeNotifier {
         jsonEncode(_availableTimezones),
       );
 
-      /// Save timestamps
       if (_languagesUpdatedAt != null) {
         await prefs.setInt(
           'langs_updated_at',
@@ -170,7 +185,7 @@ class SettingsProvider extends ChangeNotifier {
       }
     } catch (e) {
       _error = 'Failed to save settings: $e';
-      }
+    }
   }
 
   Future<void> updateDarkMode(bool value) async {
@@ -215,7 +230,46 @@ class SettingsProvider extends ChangeNotifier {
       fetchAvailableLanguages(),
       fetchAvailableCurrencies(),
       fetchAvailableTimezones(),
+      fetchUserTimezone(),
     ]);
+  }
+
+  /// Identifies the signed-in account (server + database + user) for the
+  /// per-account timezone cache. Null when there is no session.
+  Future<String?> _currentOwnerKey() async {
+    final session = await OdooSessionManager.getCurrentSession();
+    if (session == null) return null;
+    return '${session.serverUrl}|${session.database}|${session.userId}';
+  }
+
+  /// Read the user's own timezone from Odoo so the Timezone row always shows
+  /// what Odoo has (including a change made in the Odoo web client). On a
+  /// network failure the cached value stays — it is never replaced by a guess.
+  Future<void> fetchUserTimezone() async {
+    try {
+      final session = await OdooSessionManager.getCurrentSession();
+      if (session == null) return;
+
+      final result = await OdooSessionManager.callKwWithCompany({
+        'model': 'res.users',
+        'method': 'read',
+        'args': [
+          [session.userId],
+          ['tz'],
+        ],
+        'kwargs': {},
+      });
+
+      if (result is List && result.isNotEmpty && result.first is Map) {
+        // Odoo returns `false` for an unset timezone.
+        final tz = (result.first as Map)['tz'];
+        _selectedTimezone = tz is String ? tz : '';
+        await saveLocalSettings();
+        notifyListeners();
+      }
+    } catch (_) {
+      // Keep the cached value; the row simply stays as it was.
+    }
   }
 
   /// Fetch available languages from Odoo
@@ -241,8 +295,7 @@ class SettingsProvider extends ChangeNotifier {
         _languagesUpdatedAt = DateTime.now();
         await saveLocalSettings();
       }
-    } catch (e) {
-       /// Fallback to defaults
+    } catch (_) {
       if (_availableLanguages.isEmpty) {
         _availableLanguages = [
           {'code': 'en_US', 'name': 'English (US)'},
@@ -281,8 +334,7 @@ class SettingsProvider extends ChangeNotifier {
         _currenciesUpdatedAt = DateTime.now();
         await saveLocalSettings();
       }
-    } catch (e) {
-      /// Fallback to defaults
+    } catch (_) {
       if (_availableCurrencies.isEmpty) {
         _availableCurrencies = [
           {'name': 'USD', 'full_name': 'US Dollar', 'symbol': '\$'},
@@ -331,8 +383,7 @@ class SettingsProvider extends ChangeNotifier {
         _timezonesUpdatedAt = DateTime.now();
         await saveLocalSettings();
       }
-    } catch (e) {
-       /// Fallback to defaults
+    } catch (_) {
       if (_availableTimezones.isEmpty) {
         _availableTimezones = [
           {'code': 'UTC', 'name': 'UTC'},
@@ -400,7 +451,7 @@ class SettingsProvider extends ChangeNotifier {
       }
     } catch (e) {
       _error = 'Failed to update user preferences: $e';
-       rethrow;
+      rethrow;
     }
   }
 
@@ -430,7 +481,7 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   Future<void> calculateCacheSize() async {
-    /// Placeholder for cache size calculation
+    // Placeholder for cache size calculation
     _cacheSize = 0.0;
     notifyListeners();
   }

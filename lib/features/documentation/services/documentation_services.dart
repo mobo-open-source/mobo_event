@@ -1,6 +1,7 @@
 import '../../../core/services/odoo_session_manager.dart';
 
 class DocumentationServices {
+  /// Build payload for updating document information
   static Map<String, dynamic> buildUpdatePayload({
     String? badge,
     String? notes,
@@ -33,6 +34,7 @@ class DocumentationServices {
     return vals;
   }
 
+  /// Update document information
   static Future<bool> update(int eventId, Map<String, dynamic> vals) async {
     try {
       if (vals.isEmpty) return true;
@@ -48,7 +50,7 @@ class DocumentationServices {
       });
 
       return true;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }

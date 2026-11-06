@@ -1,3 +1,4 @@
+/// Event type model
 class EventTypeModel {
   final int id;
   final String displayName;

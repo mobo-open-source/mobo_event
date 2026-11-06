@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/screen_layout.dart';
 
 enum SnackbarType { info, success, warning, error }
 
 class CustomSnackbar {
+  /// Widest a snackbar gets on a wide (landscape) window.
+  static const double _maxWidth = 560;
+
   static void show({
     required BuildContext context,
     required String title,
@@ -14,25 +19,33 @@ class CustomSnackbar {
   }
 
   static void _showSnackBar(
-      BuildContext context,
-      String title,
-      String message,
-      SnackbarType type,
-      Duration duration,
-      ) {
+    BuildContext context,
+    String title,
+    String message,
+    SnackbarType type,
+    Duration duration,
+  ) {
     if (!context.mounted) {
-       return;
+      return;
     }
 
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) {
-       return;
+      return;
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final colors = _getColorsForType(type, isDark);
 
     messenger.clearSnackBars();
+
+    // A phone in landscape is 700–900dp wide: a message stretched across all of
+    // it reads badly, so it is capped to a centred column there. (A SnackBar
+    // takes either a `width` or a `margin`, not both.) Below that — every
+    // phone in portrait — it keeps its 16dp side margins.
+    final capWidth =
+        context.isLandscape &&
+        MediaQuery.sizeOf(context).width > _maxWidth + 32;
 
     messenger.showSnackBar(
       SnackBar(
@@ -41,11 +54,10 @@ class CustomSnackbar {
         backgroundColor: Colors.transparent,
         elevation: 0,
         dismissDirection: DismissDirection.horizontal,
-        margin: const EdgeInsets.only(
-          left: 16,
-          right: 16,
-          bottom: 10,
-        ),
+        width: capWidth ? _maxWidth : null,
+        margin: capWidth
+            ? null
+            : const EdgeInsets.only(left: 16, right: 16, bottom: 10),
         content: _SnackBarContent(
           title: title,
           message: message,
@@ -62,38 +74,41 @@ class CustomSnackbar {
       case SnackbarType.info:
         return _SnackbarColors(
           icon: Icons.info_outline,
-          iconColor: Colors.blue[300]!,
-          iconBackgroundColor: Colors.blue.withValues(alpha: 0.2),
-          backgroundColor:
-          isDark ? const Color(0xFF2D3748) : const Color(0xFF4A5568),
+          iconColor: StatusColors.infoIcon,
+          iconBackgroundColor: StatusColors.blue.withValues(alpha: 0.2),
+          backgroundColor: isDark
+              ? const Color(0xFF2D3748)
+              : const Color(0xFF4A5568),
         );
       case SnackbarType.success:
         return _SnackbarColors(
           icon: Icons.check_circle_outline,
-          iconColor: Colors.green[300]!,
-          iconBackgroundColor: Colors.green.withValues(alpha: 0.2),
-          backgroundColor:
-          isDark ? const Color(0xFF2D4A3D) : const Color(0xFF4A6B5A),
+          iconColor: StatusColors.successIcon,
+          iconBackgroundColor: StatusColors.green.withValues(alpha: 0.2),
+          backgroundColor: isDark
+              ? const Color(0xFF2D4A3D)
+              : const Color(0xFF4A6B5A),
         );
       case SnackbarType.warning:
         return _SnackbarColors(
           icon: Icons.warning_outlined,
-          iconColor: Colors.orange[300]!,
-          iconBackgroundColor: Colors.orange.withValues(alpha: 0.2),
-          backgroundColor:
-          isDark ? const Color(0xFF4A3D2D) : const Color(0xFF6B5A4A),
+          iconColor: StatusColors.warningIcon,
+          iconBackgroundColor: StatusColors.orange.withValues(alpha: 0.2),
+          backgroundColor: isDark
+              ? const Color(0xFF4A3D2D)
+              : const Color(0xFF6B5A4A),
         );
       case SnackbarType.error:
         return _SnackbarColors(
           icon: Icons.error_outline,
-          iconColor: Colors.red[300]!,
-          iconBackgroundColor: Colors.red.withValues(alpha: 0.2),
-          backgroundColor:
-          isDark ? const Color(0xFF4A2D2D) : const Color(0xFF6B4A4A),
+          iconColor: StatusColors.errorIcon,
+          iconBackgroundColor: StatusColors.red.withValues(alpha: 0.2),
+          backgroundColor: isDark
+              ? const Color(0xFF4A2D2D)
+              : const Color(0xFF6B4A4A),
         );
     }
   }
-
 
   static void showSuccess(BuildContext context, String message) {
     show(
@@ -138,7 +153,7 @@ class CustomSnackbar {
       context: context,
       title: 'You are offline',
       message:
-      'No internet connection. Please check your Wi-Fi or mobile data.',
+          'No internet connection. Please check your Wi-Fi or mobile data.',
       type: SnackbarType.error,
       duration: const Duration(seconds: 5),
     );
@@ -149,7 +164,7 @@ class CustomSnackbar {
       context: context,
       title: 'Server unreachable',
       message:
-      'Cannot reach the server. Please verify the server URL and your network connection.',
+          'Cannot reach the server. Please verify the server URL and your network connection.',
       type: SnackbarType.error,
       duration: const Duration(seconds: 5),
     );
@@ -165,8 +180,6 @@ class CustomSnackbar {
     );
   }
 }
-
-/// ===== UI WIDGET =====
 
 class _SnackBarContent extends StatelessWidget {
   final String title;
@@ -192,7 +205,7 @@ class _SnackBarContent extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha: 0.2),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -208,11 +221,7 @@ class _SnackBarContent extends StatelessWidget {
                 color: colors.iconBackgroundColor,
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                colors.icon,
-                size: 16,
-                color: colors.iconColor,
-              ),
+              child: Icon(colors.icon, size: 16, color: colors.iconColor),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -237,8 +246,7 @@ class _SnackBarContent extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
-                      color:
-                      isDark ? Colors.grey[300] : Colors.grey[100],
+                      color: isDark ? Colors.grey[300] : Colors.grey[100],
                     ),
                   ),
                 ],
@@ -250,8 +258,7 @@ class _SnackBarContent extends StatelessWidget {
               child: Icon(
                 Icons.close,
                 size: 16,
-                color:
-                isDark ? Colors.grey[300] : Colors.grey[100],
+                color: isDark ? Colors.grey[300] : Colors.grey[100],
               ),
             ),
           ],

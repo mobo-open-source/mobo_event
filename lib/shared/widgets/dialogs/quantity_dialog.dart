@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../forms/mobo_form_field.dart';
+import 'common_dialog.dart';
+
 /// Reusable quantity input dialog
 class QuantityDialog {
   static Future<double?> show(
@@ -8,33 +11,30 @@ class QuantityDialog {
     double initialValue = 1.0,
   }) {
     final controller = TextEditingController(text: initialValue.toString());
-    
+
     return showDialog<double>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: TextField(
+      // A CommonDialog — whose title and field scroll while Cancel / Confirm
+      // stay pinned — rather than an AlertDialog, whose title and buttons can't
+      // give way to the keyboard the autofocused field opens (a phone in
+      // landscape is left ~100–200dp).
+      builder: (ctx) => CommonDialog(
+        title: title,
+        // The app's standard field look (see `Field`).
+        body: MoboTextField(
           controller: controller,
+          label: 'Quantity',
+          hintText: 'Enter quantity',
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Quantity',
-            border: OutlineInputBorder(),
-          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final value = double.tryParse(controller.text);
-              Navigator.pop(ctx, value);
-            },
-            child: const Text('Confirm'),
-          ),
-        ],
+        secondaryLabel: 'Cancel',
+        onSecondary: () => Navigator.pop(ctx),
+        primaryLabel: 'Confirm',
+        onPrimary: () {
+          final value = double.tryParse(controller.text);
+          Navigator.pop(ctx, value);
+        },
       ),
     );
   }

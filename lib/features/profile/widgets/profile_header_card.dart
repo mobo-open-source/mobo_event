@@ -1,13 +1,13 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../shared/widgets/odoo_avatar.dart';
 
 class ProfileHeaderCard extends StatelessWidget {
   final String name;
   final String email;
   final String? jobFunction;
-  final Uint8List? avatar;
+  final String? avatarBase64;
   final VoidCallback? onCameraPressed;
   final VoidCallback? onTap;
   final bool showCameraButton;
@@ -17,7 +17,7 @@ class ProfileHeaderCard extends StatelessWidget {
     required this.name,
     required this.email,
     this.jobFunction,
-    this.avatar,
+    this.avatarBase64,
     this.onCameraPressed,
     this.onTap,
     this.showCameraButton = true,
@@ -28,43 +28,12 @@ class ProfileHeaderCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     double rs(double size) {
-      final w = MediaQuery.of(context).size.width;
+      // Shortest side, not width: a phone turned sideways is wider, not
+      // roomier, and scaling the text up for it only squeezes the name.
+      final w = MediaQuery.sizeOf(context).shortestSide;
       final scale = (w / 390.0).clamp(0.85, 1.2);
       return size * scale;
     }
-
-    Widget photoWidget = avatar != null
-        ? ClipOval(
-      child: Image.memory(
-        avatar!,
-        height: 50,
-        width: 50,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          return CircleAvatar(
-            radius: 25,
-            backgroundColor:
-            isDark ? Colors.grey[700] : Colors.grey[300],
-            child: HugeIcon(
-              icon: HugeIcons.strokeRoundedUserCircle,
-              size: 30,
-              color: isDark
-                  ? Colors.grey[500]
-                  : Colors.grey[600],
-            ),
-          );
-        },
-      ),
-    )
-        : CircleAvatar(
-            radius: 34,
-            backgroundColor: isDark ? Colors.grey[700] : Colors.grey[300],
-            child: HugeIcon(
-              icon:HugeIcons.strokeRoundedUserCircle,
-              size: 30,
-              color: isDark ? Colors.grey[500] : Colors.grey[600],
-            ),
-          );
 
     final content = Container(
       margin: const EdgeInsets.all(20),
@@ -91,17 +60,27 @@ class ProfileHeaderCard extends StatelessWidget {
               children: [
                 Center(
                   child: Container(
+                    padding: const EdgeInsets.all(2),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(color: Colors.grey[200]!, width: 2),
                     ),
-                    child: photoWidget,
+                    child: OdooAvatar(
+                      imageBase64: avatarBase64,
+                      size: 68,
+                      iconSize: 30,
+                      placeholderColor: isDark
+                          ? Colors.grey[700]
+                          : Colors.grey[300],
+                      iconColor: isDark ? Colors.grey[500] : Colors.grey[600],
+                      borderRadius: BorderRadius.circular(34),
+                    ),
                   ),
                 ),
                 if (showCameraButton && onCameraPressed != null)
                   Positioned(
-                    bottom: 8,
-                    right: 8,
+                    bottom: 0,
+                    right: 0,
                     child: InkWell(
                       onTap: onCameraPressed,
                       borderRadius: BorderRadius.circular(20),
@@ -121,7 +100,7 @@ class ProfileHeaderCard extends StatelessWidget {
                           ],
                         ),
                         child: const HugeIcon(
-                         icon: HugeIcons.strokeRoundedCamera02,
+                          icon: HugeIcons.strokeRoundedCamera02,
                           color: Colors.white,
                           size: 16,
                         ),
@@ -171,7 +150,7 @@ class ProfileHeaderCard extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.only(left: 8),
               child: HugeIcon(
-               icon:  HugeIcons.strokeRoundedArrowRight01,
+                icon: HugeIcons.strokeRoundedArrowRight01,
                 color: Colors.white,
                 size: 20,
               ),

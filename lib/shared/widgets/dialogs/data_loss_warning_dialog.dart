@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 
+import '../../../core/utils/screen_layout.dart';
+import '../mobo/mobo_button.dart';
+import 'pinned_footer_layout.dart';
+
 class DataLossWarningDialog extends StatelessWidget {
   final String title;
   final String message;
@@ -23,109 +27,73 @@ class DataLossWarningDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = Theme.of(context).primaryColor;
+    // A phone in landscape is ~300–400dp tall: tighter margins and a smaller
+    // icon, and the text scrolls while the footer buttons stay in view.
+    final short = context.isShortScreen;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       backgroundColor: isDark ? Colors.grey[900] : Colors.white,
-      elevation: 8,
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      insetPadding: short
+          ? const EdgeInsets.symmetric(horizontal: 40, vertical: 8)
+          : null,
       child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            /// Warning Icon
-            Container(
-              decoration: BoxDecoration(
-                color: isDark ? primaryColor : primaryColor.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              padding: const EdgeInsets.all(16),
-              child: HugeIcon(
-                icon: HugeIcons.strokeRoundedAlert02,
-                color: isDark ? Colors.white : primaryColor,
-                size: 32,
-              ),
-            ),
-            const SizedBox(height: 20),
+        padding: EdgeInsets.all(short ? 16 : 24),
+        child: PinnedFooterLayout(
+          gap: short ? 16 : 24,
+          scrollAllBelow: 110,
 
-            /// Title
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-
-            /// Message
-            Text(
-              message,
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.grey[300] : Colors.grey[700],
-                height: 1.4,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-
-            /// Action Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed:
-                        onCancel ?? () => Navigator.of(context).pop(false),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(
-                          color: isDark ? Colors.grey[600]! : Colors.grey[300]!,
-                        ),
-                      ),
-                    ),
-                    child: Text(
-                      cancelText,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        color: isDark ? Colors.grey[300] : Colors.grey[700],
-                      ),
-                    ),
-                  ),
+          // Action Buttons — the §5 footer.
+          footer: MoboButtonRow(
+            secondaryLabel: cancelText,
+            onSecondary: onCancel ?? () => Navigator.of(context).pop(false),
+            primaryLabel: confirmText,
+            onPrimary: () {
+              Navigator.of(context).pop(true);
+              onConfirm();
+            },
+          ),
+          body: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: primaryColor.withValues(alpha: isDark ? 0.2 : 0.1),
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).pop(true);
-                      onConfirm();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryColor,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      confirmText,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
+                padding: EdgeInsets.all(short ? 12 : 16),
+                child: HugeIcon(
+                  icon: HugeIcons.strokeRoundedAlert02,
+                  color: primaryColor,
+                  size: short ? 26 : 32,
                 ),
-              ],
-            ),
-          ],
+              ),
+              SizedBox(height: short ? 12 : 20),
+
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+
+              Text(
+                message,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.grey[300] : Colors.grey[700],
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local AI-assistant instructions (kept on disk, not published)
+CLAUDE.md
+
+# Local VS Code workspace files
+*.code-workspace

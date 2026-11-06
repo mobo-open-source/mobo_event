@@ -1,4 +1,4 @@
-
+/// Event response model
 class EventResponse {
   final EventValue value;
 
@@ -25,6 +25,9 @@ class EventValue {
   final User userId;
   final Address addressId;
 
+  /// What a new event starts as on the website; false unless the server's
+  /// defaults say otherwise.
+  final bool websitePublished;
 
   EventValue({
 
@@ -35,6 +38,7 @@ class EventValue {
     required this.organizerId,
     required this.userId,
     required this.addressId,
+    this.websitePublished = false,
   });
 
   static DateTime _safeDate(dynamic v) {
@@ -53,8 +57,7 @@ class EventValue {
 
         return DateTime.parse(cleaned).toLocal();
       }
-    } catch (e) {
-    }
+    } catch (_) {}
     return DateTime.now();
   }
 
@@ -67,6 +70,7 @@ class EventValue {
       organizerId: Company.fromJson(json['organizer_id']),
       userId: User.fromJson(json['user_id']),
       addressId: Address.fromJson(json['address_id']),
+      websitePublished: json['website_published'] == true,
 
     );
   }

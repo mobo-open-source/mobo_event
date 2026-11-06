@@ -6,6 +6,8 @@ import '../model/activity_type.dart';
 import '../model/user_model.dart';
 
 class EventActivityServices {
+
+  ///fetch the activities
   Future<List<ActivitiesModel>> fetchActivities(
     List<dynamic> activityIds,
   ) async {
@@ -27,11 +29,12 @@ class EventActivityServices {
           .toList();
 
       return activityList;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
 
+  ///mark as done to odooo
   Future<void> markAsDone(int activityId) async {
     try {
       await OdooSessionManager.callKwWithCompany({
@@ -42,9 +45,14 @@ class EventActivityServices {
         ],
         'kwargs': {},
       });
-    } catch (e) {}
+    } catch (_) {
+      // Not swallowed: a refusal has to reach the card, which otherwise says
+      // "Activity Done" over an activity the server left open.
+      rethrow;
+    }
   }
 
+  ///remove the activity
   Future<void> removeActivity(int activityId) async {
     try {
       await OdooSessionManager.callKwWithCompany({
@@ -55,9 +63,13 @@ class EventActivityServices {
         ],
         'kwargs': {},
       });
-    } catch (e) {}
+    } catch (_) {
+      // Not swallowed, for the same reason as [markAsDone].
+      rethrow;
+    }
   }
 
+  ///fetch activity types from odoo
   Future<List<ActivityTypeModel>> fetchActivityTypes({
     String? search,
     int limit = 3,
@@ -107,6 +119,7 @@ class EventActivityServices {
     return (res as List).map((e) => UserModel.fromJson(e)).toList();
   }
 
+  /// create method
   Future<int> createActivity({
     required int resId,
     required String model,
@@ -157,11 +170,12 @@ class EventActivityServices {
       });
 
       return res as int;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
 
+  ///update the activity
   Future<void> updateActivity({
     required int activityId,
     required int typeId,
@@ -185,7 +199,7 @@ class EventActivityServices {
           },
         ],
       });
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }

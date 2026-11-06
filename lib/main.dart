@@ -14,6 +14,8 @@ import 'package:mobo_event/features/scheduler/services/mail_scheduler_services.d
 import 'package:provider/provider.dart';
 import 'core/const/keys/global_keys.dart';
 import 'core/providers/logout_view_model.dart';
+import 'core/routing/unfocus_observer.dart';
+import 'core/services/event_access_rights.dart';
 import 'core/services/session_service.dart';
 import 'features/company/providers/company_provider.dart';
 import 'features/event/provider/event_detailed_provider.dart';
@@ -26,7 +28,6 @@ import 'features/settings/providers/settings_provider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
   runApp(
     MultiProvider(
       providers: [
@@ -34,6 +35,12 @@ void main() {
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => ProfileProvider()),
         ChangeNotifierProvider(create: (_) => LogoutViewModel()),
+
+        // What the signed-in account may create, edit and delete — read by
+        // every screen that offers one of those actions.
+        ChangeNotifierProvider<AccessRights>.value(
+          value: AccessRights.instance,
+        ),
         ChangeNotifierProvider(
           create: (_) => HomeProvider(services: HomeServices()),
         ),
@@ -61,12 +68,9 @@ void main() {
           value: SessionService.instance,
         ),
 
-        /// Provide CompanyProvider globally and initialize companies on app start
         ChangeNotifierProvider(
           create: (_) {
             final p = CompanyProvider();
-
-            /// Kick off initial load from server; will show loading in selector
             p.initialize();
             return p;
           },
@@ -85,13 +89,11 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  /// This widget is the root of your application.
-
   @override
   void initState() {
     super.initState();
 
-    /// Track app open for review system after a delay to ensure activity is ready
+    // Track app open for review system after a delay to ensure activity is ready
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future.delayed(const Duration(seconds: 2), () {
         ReviewService().trackAppOpen();
@@ -105,12 +107,18 @@ class _MyAppState extends State<MyApp> {
       builder: (context, provider, child) {
         return MaterialApp(
           navigatorKey: navigatorKey,
+          navigatorObservers: [UnfocusOnPushObserver()],
           scaffoldMessengerKey: scaffoldMessengerKey,
           title: 'mobo events',
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: provider.themeMode,
           debugShowCheckedModeBanner: false,
+          builder: (context, child) => GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+            child: child,
+          ),
           home: const SplashScreen(),
         );
       },

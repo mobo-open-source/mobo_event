@@ -1,3 +1,4 @@
+import 'package:odoo_rpc/odoo_rpc.dart';
 
 import '../services/connectivity_service.dart';
 
@@ -7,20 +8,43 @@ import '../services/connectivity_service.dart';
 /// surface as stringified exceptions from the HTTP layer (werkzeug NotFound,
 /// KeyError on model names, etc.).
 class OdooErrorMapper {
+  /// The server's own wording for [error], when it is an [OdooException] that
+  /// carries one.
+  ///
+  /// Odoo answers a failed call with `{code, message: 'Odoo Server Error',
+  /// data: {name, message, debug, ...}}`. The outer `message` is always that
+  /// generic label and `debug` is the Python traceback; `data.message` is the
+  /// sentence Odoo itself wrote for the user ("You are not allowed to access
+  /// …", the text of a `UserError`, …). Returns null when there is none, so
+  /// callers fall back to the string-based mapping below.
+  static OdooErrorDetail? detailOf(Object error) {
+    if (error is! OdooException) return null;
+    final raw = error.error;
+    if (raw is! Map) return null;
+
+    final data = raw['data'];
+    final dataMap = data is Map ? data : const {};
+    final message = dataMap['message']?.toString().trim();
+    final name = dataMap['name']?.toString().split('.').last;
+
+    if ((message == null || message.isEmpty) && name == null) return null;
+    return OdooErrorDetail(
+      name: name,
+      message: (message == null || message.isEmpty) ? null : message,
+    );
+  }
+
   static String toUserMessage(Object error) {
     final raw = error.toString();
 
-    /// Connectivity and reachability
     if (error is NoInternetException) {
-
       return 'No internet connection. Please check Wi‑Fi or mobile data and try again.';
     }
     if (error is ServerUnreachableException) {
-
       return 'Cannot reach the server. Please verify the server URL and your network connection.';
     }
 
-    /// Common 404 from /web/dataset with KeyError for models
+    // Common 404 from /web/dataset with KeyError for models
     final modelKeyErr = RegExp(r"KeyError: '([a-zA-Z0-9_.]+)'");
     final match = modelKeyErr.firstMatch(raw);
     if (match != null) {
@@ -43,16 +67,14 @@ class OdooErrorMapper {
       return message.toString();
     }
 
-    /// Check for model not found in error message
     if (raw.contains('model') &&
         (raw.contains('not found') || raw.contains('does not exist'))) {
       return 'Required module not found. The feature you\'re trying to access requires an Odoo app that is not installed. Please contact your administrator.';
     }
 
-    /// werkzeug 404 without explicit KeyError
+    // werkzeug 404 without explicit KeyError
     if (raw.contains('werkzeug.exceptions.NotFound') ||
         raw.contains('404 Not Found')) {
-
       return 'Server resource not found. This may indicate:\n'
           '• Missing Odoo modules/apps\n'
           '• Insufficient permissions\n'
@@ -60,31 +82,24 @@ class OdooErrorMapper {
           'Please verify your access rights and installed apps.';
     }
 
-    /// Access rights / permissions
     if (raw.contains('Access Denied') || raw.contains('AccessError')) {
-
       return 'Access Denied. You don\'t have permission to access this feature. Please contact your administrator to grant the necessary access rights.';
     }
 
-    /// Authentication/session issues
     if (raw.contains('authentication') ||
         (raw.contains('uid') && raw.contains('context'))) {
       return 'Authentication failed or your session is invalid. Please sign in again and retry.';
     }
 
-    /// Database errors
     if (raw.contains('database') && raw.contains('not exist')) {
-
       return 'Database not found. Please verify your database name and server configuration.';
     }
 
-    /// Default fallback keeps it short
     return 'Unexpected server error. Please try again or contact support.';
   }
 
   static String? _moduleHintForModel(String model) {
     switch (model) {
-      /// Inventory/Stock related
       case 'stock.picking':
       case 'stock.picking.type':
         return ' Required App: Inventory\n'
@@ -101,7 +116,6 @@ class OdooErrorMapper {
         return ' Required App: Inventory\n'
             'This feature needs the "Inventory" app to manage warehouses and stock quantities.';
 
-      /// Product related
       case 'product.product':
       case 'product.template':
         return ' Required App: Product (Sales/Inventory)\n'
@@ -111,38 +125,32 @@ class OdooErrorMapper {
         return ' Required App: Product\n'
             'This feature needs product categorization which comes with Sales or Inventory apps.';
 
-      /// Manufacturing
       case 'mrp.production':
       case 'mrp.bom':
       case 'mrp.workcenter':
         return ' Required App: Manufacturing\n'
             'This feature needs the "Manufacturing" app to manage production orders.';
 
-      /// Purchase
       case 'purchase.order':
       case 'purchase.order.line':
         return ' Required App: Purchase\n'
             'This feature needs the "Purchase" app to manage supplier orders.';
 
-      /// Sales
       case 'sale.order':
       case 'sale.order.line':
         return ' Required App: Sales\n'
             'This feature needs the "Sales" app to manage customer orders.';
 
-      /// Accounting
       case 'account.move':
       case 'account.invoice':
         return ' Required App: Accounting\n'
             'This feature needs the "Accounting" app to manage invoices and journal entries.';
 
-      /// HR/Attendance
       case 'hr.employee':
       case 'hr.attendance':
         return ' Required App: HR/Attendance\n'
             'This feature needs the "Employees" or "Attendance" app.';
 
-      /// Partners/Contacts
       case 'res.partner':
         return ' Required App: Contacts\n'
             'This feature needs the "Contacts" app (usually installed by default).';
@@ -151,6 +159,24 @@ class OdooErrorMapper {
         return null;
     }
   }
+}
 
+/// What Odoo reported for a failed call: the exception class
+/// (`UserError`, `AccessError`, …) and the message it carried.
+class OdooErrorDetail {
+  final String? name;
+  final String? message;
 
+  const OdooErrorDetail({this.name, this.message});
+
+  bool get isAccess => name == 'AccessError' || name == 'AccessDenied';
+
+  /// An error Odoo raised on purpose, with text meant to be shown to the user,
+  /// as opposed to an unexpected failure whose message is a Python exception.
+  bool get isIntentional =>
+      message != null &&
+      (isAccess ||
+          name == 'UserError' ||
+          name == 'ValidationError' ||
+          name == 'MissingError');
 }

@@ -1,3 +1,5 @@
+
+/// List of timezones supported by Odoo
 const List<String> odooTimezones = [
   'UTC',
 
