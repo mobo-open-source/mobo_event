@@ -11,9 +11,11 @@ import 'package:mobo_event/features/registration/model/event_registration.dart'
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/services/odoo_session_manager.dart';
+import '../../../core/utils/odoo_compat.dart';
 import '../../event/model/fetch_model.dart';
 
 class RegistrationServices {
+  /// Add attendee by qr
   Future addAttendeesByQr(String qrCode) async {
     try {
       final response = await OdooSessionManager.callKwWithCompany({
@@ -23,14 +25,13 @@ class RegistrationServices {
         'kwargs': {'barcode': qrCode, 'event_id': false},
       });
 
-      final attendee = AttendeeModel.fromJson(response);
-
-      return attendee;
-    } catch (e) {
+      return _parseScannedAttendee(response);
+    } catch (_) {
       rethrow;
     }
   }
 
+  /// Add attendee by qr
   Future<AttendeeModel> addAttendeesByQrByEvent(
     String qrCode,
     int eventId,
@@ -43,12 +44,26 @@ class RegistrationServices {
         'kwargs': {},
       });
 
-      return AttendeeModel.fromJson(response);
-    } catch (e) {
+      return _parseScannedAttendee(response);
+    } catch (_) {
       rethrow;
     }
   }
 
+  /// Odoo answers an unknown/invalid code with `{'error': ...}` (no id/name).
+  AttendeeModel _parseScannedAttendee(dynamic response) {
+    if (response is! Map || response['error'] != null || response['id'] is! int) {
+      final error = response is Map ? response['error'] : null;
+      throw Exception(
+        error == 'already_registered'
+            ? 'Ticket already registered'
+            : 'Invalid ticket',
+      );
+    }
+    return AttendeeModel.fromJson(Map<String, dynamic>.from(response));
+  }
+
+  /// Get attendees by event
   Future getAttendeesByEvent({
     required int limit,
     required int offset,
@@ -109,11 +124,12 @@ class RegistrationServices {
           .map((items) => AttendeeShortModel.fromJson(items))
           .toList();
       return attendees;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
 
+  /// Get attendees count by event
   Future<int> gettingAttendeesCountByEvent({
     String search = '',
     List<dynamic> filter = const [],
@@ -170,11 +186,92 @@ class RegistrationServices {
       });
 
       return count as int;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
 
+  /// Every attendee matching [search] and [filter] — of one event when
+  /// [eventId] is given — for a grouped list, which has to see all of them to
+  /// know its groups and their counts (a page of 40 would split a group across
+  /// pages). Only the fields the cards and the groupings read are asked for:
+  /// without them Odoo returns every field of every registration.
+  Future<List<AttendeeShortModel>> getAllAttendees({
+    int? eventId,
+    String search = '',
+    List<String> filter = const [],
+  }) async {
+    try {
+      final List domain = [
+        if (eventId != null) ['event_id', '=', eventId],
+      ];
+      if (search.isNotEmpty) {
+        domain.addAll([
+          '|',
+          '|',
+          ['name', 'ilike', search],
+          ['email', 'ilike', search],
+          ['company_name', 'ilike', search],
+        ]);
+      }
+      if (filter.contains('Unconfirmed or Registered')) {
+        domain.addAll([
+          "|",
+          ["state", "=", "draft"],
+          ["state", "=", "open"],
+        ]);
+      }
+      if (filter.contains('Ongoing Events')) {
+        domain.add(["event_id.is_ongoing", "=", true]);
+      }
+      if (filter.contains('Taken')) {
+        domain.add([
+          "state",
+          "in",
+          ["open", "done"],
+        ]);
+      }
+      if (filter.contains('Unconfirmed')) {
+        domain.add(["state", "=", "draft"]);
+      }
+      if (filter.contains('Registered')) {
+        domain.add(["state", "=", "open"]);
+      }
+      if (filter.contains('Attended')) {
+        domain.add(["state", "=", "done"]);
+      }
+
+      // `event_slot_id` is an Odoo 19 field; older servers don't know it.
+      final compat = await OdooCompat.current();
+      final response = await OdooSessionManager.callKwWithCompany({
+        'model': 'event.registration',
+        'method': 'search_read',
+        'args': [],
+        'kwargs': {
+          'domain': domain,
+          'fields': [
+            'name',
+            'company_name',
+            'event_id',
+            'event_ticket_id',
+            'barcode',
+            'state',
+            'partner_id',
+            'create_date',
+            if (compat.hasEventSlots) 'event_slot_id',
+          ],
+        },
+      });
+
+      return (response as List)
+          .map((items) => AttendeeShortModel.fromJson(items))
+          .toList();
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  /// Get attendees by pagination
   Future getAttendeesByPagination({
     required int limit,
     required int offset,
@@ -229,11 +326,12 @@ class RegistrationServices {
           .map((items) => AttendeeShortModel.fromJson(items))
           .toList();
       return attendees;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
 
+  /// Get attendees count
   Future<int> gettingAttendeesCount({
     String search = '',
     List<String> filter = const [],
@@ -278,20 +376,23 @@ class RegistrationServices {
       });
 
       return count as int;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
 
+  /// Marks a registration as attended — the same button Odoo shows, which is
+  /// a different server method from Odoo 20 on (see [OdooCompat]).
   Future actionDone(int id) async {
     try {
-      final result = await OdooSessionManager.callKwWithCompany({
+      final compat = await OdooCompat.current();
+      await OdooSessionManager.callKwWithCompany({
         'model': 'event.registration',
-        'method': 'action_set_done',
+        'method': compat.attendRegistrationMethod,
         'args': [id],
         'kwargs': {},
       });
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -303,6 +404,8 @@ class RegistrationServices {
         bytes[2] == 0x44 &&
         bytes[3] == 0x46;
   }
+
+  ///download the badge
 
   Future<File?> downloadBadge(int registrationId) async {
     try {
@@ -327,7 +430,7 @@ class RegistrationServices {
           if (response.statusCode == 200 && _isPdf(response.bodyBytes)) {
             break;
           }
-        } catch (e) {
+        } catch (_) {
           if (attempt == maxRetry) rethrow;
           await Future.delayed(Duration(seconds: 2 * attempt));
         }
@@ -351,18 +454,14 @@ class RegistrationServices {
       final file = File("${dir.path}/badge_${registrationId}_$timestamp.pdf");
       await file.writeAsBytes(bytes);
       return file;
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
 
   Future onChangeNew(int? eventId) async {
     try {
-      final session = await OdooSessionManager.getCurrentSession();
-
-      final version = session!.odooSession.serverVersion;
-
-      String odooVersion = version;
+      final compat = await OdooCompat.current();
 
       final result = await OdooSessionManager.callKwWithCompany({
         'model': 'event.registration',
@@ -385,7 +484,7 @@ class RegistrationServices {
               'fields': {'display_name': {}},
               'context': {'name_with_seats_availability': true},
             },
-            if (odooVersion == '19')
+            if (compat.hasEventSlots)
               'event_slot_id': {
                 'fields': {'display_name': {}},
                 'context': {'name_with_seats_availability': true},
@@ -425,7 +524,7 @@ class RegistrationServices {
               },
               'limit': 40,
             },
-            if (odooVersion == '19') 'is_multi_slots': {},
+            if (compat.hasEventSlots) 'is_multi_slots': {},
             'display_name': {},
           },
         ],
@@ -440,7 +539,7 @@ class RegistrationServices {
       });
       final registration = EventRegistration.fromJson(result['value']);
       return registration;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -480,6 +579,11 @@ class RegistrationServices {
         'kwargs': {
           'domain': finalDomain,
           'limit': limit,
+          // FetchModel only reads id and display_name. Reading every field
+          // also pulls relations the user may not be allowed to see — a
+          // visitor's page history (website.track) is restricted to website
+          // designers, so the Visitor picker failed for event users.
+          'fields': ['display_name'],
           'context': {'is_registration_desk_view': true},
         },
       });
@@ -489,7 +593,7 @@ class RegistrationServices {
       final fetched = res.map((item) => FetchModel.fromJson(item)).toList();
 
       return fetched;
-    } catch (e, st) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -513,6 +617,11 @@ class RegistrationServices {
         'kwargs': {
           'domain': finalDomain,
           'limit': limit,
+          // FetchModel only reads id and display_name. Reading every field
+          // also pulls relations the user may not be allowed to see — a
+          // visitor's page history (website.track) is restricted to website
+          // designers, so the Visitor picker failed for event users.
+          'fields': ['display_name'],
           'context': {'is_registration_desk_view': true},
         },
       });
@@ -522,7 +631,7 @@ class RegistrationServices {
       final fetched = res.map((item) => FetchModel.fromJson(item)).toList();
 
       return fetched;
-    } catch (e, st) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -546,6 +655,11 @@ class RegistrationServices {
         'kwargs': {
           'domain': finalDomain,
           'limit': limit,
+          // FetchModel only reads id and display_name. Reading every field
+          // also pulls relations the user may not be allowed to see — a
+          // visitor's page history (website.track) is restricted to website
+          // designers, so the Visitor picker failed for event users.
+          'fields': ['display_name'],
           'context': {'is_registration_desk_view': true},
         },
       });
@@ -555,7 +669,7 @@ class RegistrationServices {
       final fetched = res.map((item) => EventQuestion.fromJson(item)).toList();
 
       return fetched;
-    } catch (e, st) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -569,7 +683,7 @@ class RegistrationServices {
         'kwargs': {},
       });
       return result;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -641,11 +755,12 @@ class RegistrationServices {
         registrationAnswers: answers,
       );
       return fullModel;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
 
+  ///edit attendee
   Future<bool> editAttendee({
     required int attendeeId,
     required Map<String, dynamic> vals,
@@ -661,7 +776,7 @@ class RegistrationServices {
         'kwargs': {},
       });
       return result;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }

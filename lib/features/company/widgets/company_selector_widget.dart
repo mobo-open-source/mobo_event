@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:provider/provider.dart';
 import '../../../shared/widgets/toggles/mobo_checkbox.dart';
 import '../providers/company_provider.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/screen_layout.dart';
 
 /// A comprehensive company selector widget with two modes:
 /// 1. Compact mode: Dropdown showing active company (for AppBar)
@@ -42,8 +44,8 @@ class CompanySelectorWidget extends StatelessWidget {
         color: isDark ? Colors.grey[900] : Colors.white,
         border: Border.all(
           color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
         ),
         borderRadius: BorderRadius.circular(20),
       ),
@@ -81,8 +83,8 @@ class CompanySelectorWidget extends StatelessWidget {
         color: isDark ? Colors.grey[900] : Colors.white,
         border: Border.all(
           color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
         ),
         borderRadius: BorderRadius.circular(20),
       ),
@@ -107,14 +109,13 @@ class CompanySelectorWidget extends StatelessWidget {
     );
   }
 
-
   Widget _buildCompactDropdown(BuildContext context, CompanyProvider provider) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white70 : Colors.black87;
-    final rawName = provider.selectedCompany?['name']?.toString() ?? 'Select Company';
+    final rawName =
+        provider.selectedCompany?['name']?.toString() ?? 'Select Company';
 
     final displayName = formatCompanyName(rawName);
-
 
     return InkWell(
       onTap: () => _showDropdownMenu(context, provider),
@@ -126,8 +127,8 @@ class CompanySelectorWidget extends StatelessWidget {
           color: isDark ? Colors.grey[900] : Colors.white,
           border: Border.all(
             color: isDark
-                ? Colors.white.withOpacity(0.08)
-                : Colors.black.withOpacity(0.06),
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
           ),
           borderRadius: BorderRadius.circular(20),
         ),
@@ -149,7 +150,7 @@ class CompanySelectorWidget extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            /// Show subtle loading spinner while provider is fetching from server
+
             if (provider.isLoading || provider.isSwitching) ...[
               SizedBox(
                 width: 14,
@@ -170,31 +171,45 @@ class CompanySelectorWidget extends StatelessWidget {
     );
   }
 
-  
-
   void _showDropdownMenu(BuildContext context, CompanyProvider provider) async {
-
     provider.initialize();
     final screenSize = MediaQuery.of(context).size;
-    /// Use bottom sheet on very narrow screens
+
     if (screenSize.width < 1000) {
       await showModalBottomSheet(
         context: context,
         isScrollControlled: true,
+        // The sheet is full-height on a landscape phone, so it has to keep
+        // clear of the status bar and any side notch there.
+        useSafeArea: context.isLandscape,
         backgroundColor: Colors.transparent,
+        // A company list stretched across an 800dp-wide landscape window is
+        // hard to read; centre it at a phone-ish width instead.
+        constraints: context.isLandscape
+            ? const BoxConstraints(maxWidth: 560)
+            : null,
         builder: (context) {
           final isDark = Theme.of(context).brightness == Brightness.dark;
-          return Container(
-            decoration: BoxDecoration(
-              color: isDark ? Colors.grey[900] : Colors.white,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(16)),
+          // Lifted clear of the keyboard when it is up (the list then
+          // shrinks to what is left above it), so nothing sits underneath.
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
             ),
-            padding: const EdgeInsets.only(top: 8, bottom: 16),
-            child: _CompanyDropdownContent(
-              provider: provider,
-              onCompanyChanged: onCompanyChanged,
-              width: screenSize.width, /// take full width inside sheet
+            child: Container(
+              decoration: BoxDecoration(
+                color: isDark ? Colors.grey[900] : Colors.white,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
+              ),
+              padding: const EdgeInsets.only(top: 8, bottom: 16),
+              child: _CompanyDropdownContent(
+                provider: provider,
+                onCompanyChanged: onCompanyChanged,
+                width: screenSize.width,
+                maxHeight: 480,
+              ),
             ),
           );
         },
@@ -202,7 +217,6 @@ class CompanySelectorWidget extends StatelessWidget {
       return;
     }
 
-    /// Popover for wider screens; clamp within viewport and set responsive width
     final RenderBox button = context.findRenderObject() as RenderBox;
     final RenderBox overlay =
         Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
@@ -215,10 +229,19 @@ class CompanySelectorWidget extends StatelessWidget {
       12,
       math.min(buttonPosition.dx, screenSize.width - popoverWidth - 12),
     );
-    final double top = math.min(
-      buttonPosition.dy + buttonSize.height + 4,
-      screenSize.height - 16 - 300, /// leave room at bottom
+    final double top = math.max(
+      8,
+      math.min(
+        buttonPosition.dy + buttonSize.height + 4,
+        // leave room at bottom
+        screenSize.height - 16 - 300,
+      ),
     );
+
+    // A wide-but-short window (landscape tablet / desktop) may have less than
+    // the usual 350dp below the button — the list scrolls to fit instead of
+    // running off the bottom.
+    final double popoverMaxHeight = math.min(350, screenSize.height - top - 12);
 
     await showGeneralDialog(
       context: context,
@@ -233,16 +256,15 @@ class CompanySelectorWidget extends StatelessWidget {
               left: left,
               top: top,
               child: Material(
-                elevation: 10,
+                elevation: 4,
                 borderRadius: BorderRadius.circular(12),
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: popoverWidth,
-                  ),
+                  constraints: BoxConstraints(maxWidth: popoverWidth),
                   child: _CompanyDropdownContent(
                     provider: provider,
                     onCompanyChanged: onCompanyChanged,
                     width: popoverWidth,
+                    maxHeight: popoverMaxHeight,
                   ),
                 ),
               ),
@@ -258,6 +280,7 @@ class CompanySelectorWidget extends StatelessWidget {
       },
     );
   }
+
   String formatCompanyName(String name) {
     final match = RegExp(r'\(([^)]+)\)').firstMatch(name);
     return match != null ? match.group(1)! : name;
@@ -268,11 +291,13 @@ class _CompanyDropdownContent extends StatefulWidget {
   final CompanyProvider provider;
   final VoidCallback? onCompanyChanged;
   final double? width;
+  final double maxHeight;
 
   const _CompanyDropdownContent({
     required this.provider,
     this.onCompanyChanged,
     this.width,
+    this.maxHeight = 350,
   });
 
   @override
@@ -281,6 +306,9 @@ class _CompanyDropdownContent extends StatefulWidget {
 }
 
 class _CompanyDropdownContentState extends State<_CompanyDropdownContent> {
+  /// Height of the Reset/Confirm footer (12 + 48 + 16).
+  static const double _footerHeight = 76;
+
   late int _tempSelectedCompanyId;
   late Set<int> _tempAllowedCompanyIds;
   bool _applying = false;
@@ -294,7 +322,8 @@ class _CompanyDropdownContentState extends State<_CompanyDropdownContent> {
 
   void _onConfirm() async {
     // If nothing changed, just close
-    final noActiveChange = _tempSelectedCompanyId == widget.provider.selectedCompanyId;
+    final noActiveChange =
+        _tempSelectedCompanyId == widget.provider.selectedCompanyId;
     final noAllowedChange = _setEquals(
       _tempAllowedCompanyIds,
       widget.provider.selectedAllowedCompanyIds.toSet(),
@@ -308,13 +337,12 @@ class _CompanyDropdownContentState extends State<_CompanyDropdownContent> {
     bool changed = false;
 
     try {
-      /// 1. Switch active company if changed
       if (!noActiveChange) {
         await widget.provider.switchCompany(_tempSelectedCompanyId);
         changed = true;
       }
 
-      /// 2. Update allowed companies if changed (do AFTER switching)
+      // Update allowed companies if changed (do AFTER switching)
       if (!noAllowedChange) {
         await widget.provider.setAllowedCompanies(
           _tempAllowedCompanyIds.toList(),
@@ -343,231 +371,268 @@ class _CompanyDropdownContentState extends State<_CompanyDropdownContent> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = Theme.of(context).primaryColor;
 
-    return Container(
-      width: widget.width ?? 280,
-      constraints: const BoxConstraints(maxHeight: 350),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2D2D2D) : Colors.white,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          /// Error banner (if any)
-          if (widget.provider.error != null)
-            Container(
-              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.red.withOpacity(0.25)),
-              ),
+    Widget buildRow(int index) {
+      final company = widget.provider.companies[index];
+      final companyId = company['id'] as int;
+      final companyName = company['name']?.toString() ?? '-';
+      final isActive = companyId == _tempSelectedCompanyId;
+      final isAllowed = _tempAllowedCompanyIds.contains(companyId);
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        child: Material(
+          // The selected row is a brand tint in both themes.
+          color: isActive
+              ? primaryColor.withValues(alpha: 0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: _applying
+                ? null
+                : () {
+                    setState(() {
+                      _tempSelectedCompanyId = companyId;
+
+                      // Odoo behavior: When you switch active company, it must be in allowed list
+                      _tempAllowedCompanyIds.add(companyId);
+                    });
+                  },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
-                  const Icon(Icons.error_outline, color: Colors.red, size: 16),
-                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      widget.provider.error!,
+                      companyName,
                       style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.white70 : Colors.black87,
+                        fontSize: 13,
+                        fontWeight: isActive
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  const SizedBox(width: 12),
+                  // Sized as in mobo Billing's company sheet: a larger tick
+                  // in a 28dp slot, kept a little in from the row's edge.
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: MoboCheckbox(
+                      value: isAllowed,
+                      onChanged: _applying
+                          ? null
+                          : (companyId == _tempSelectedCompanyId)
+                          ? null
+                          // active company cannot be unchecked
+                          : (val) {
+                              setState(() {
+                                if (val == true) {
+                                  _tempAllowedCompanyIds.add(companyId);
+                                } else {
+                                  _tempAllowedCompanyIds.remove(companyId);
+                                }
+                              });
+                            },
+                      size: 26,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                 ],
               ),
             ),
-          /// Company list
-          Flexible(
-            child: ListView.builder(
-              key: Key("listview"),
-              shrinkWrap: true,
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: widget.provider.companies.length,
-              itemBuilder: (context, index) {
-                final company = widget.provider.companies[index];
-                final companyId = company['id'] as int;
-                final companyName = company['name']?.toString() ?? '-';
-                final isActive = companyId == _tempSelectedCompanyId;
-                final isAllowed = _tempAllowedCompanyIds.contains(companyId);
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Material(
-                    color: isActive
-                        ? (primaryColor.withOpacity(0.1))
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(8),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(8),
-                      onTap: _applying ? null : () {
+          ),
+        ),
+      );
+    }
+
+    final footer = Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: SizedBox(
+              height: 48,
+              child: OutlinedButton(
+                onPressed: _applying
+                    ? null
+                    : () {
                         setState(() {
-                          _tempSelectedCompanyId = companyId;
-                          /// Odoo behavior: When you switch active company, it must be in allowed list
-                          _tempAllowedCompanyIds.add(companyId);
+                          _tempSelectedCompanyId =
+                              widget.provider.selectedCompanyId ?? -1;
+                          _tempAllowedCompanyIds = widget
+                              .provider
+                              .selectedAllowedCompanyIds
+                              .toSet();
                         });
                       },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                companyName,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: isActive
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: MoboCheckbox(
-                                value: isAllowed,
-                                onChanged: _applying
-                                    ? null
-                                    : (companyId == _tempSelectedCompanyId)
-                                    ? null /// active company cannot be unchecked
-                                    : (val) {
-                                  setState(() {
-                                    if (val == true) {
-                                      _tempAllowedCompanyIds.add(companyId);
-                                    } else {
-                                      _tempAllowedCompanyIds.remove(
-                                        companyId,
-                                      );
-                                    }
-                                  });
-                                },
-                                size: 18,
-                                ),
-                            ),
-                            const SizedBox(width: 8),
-
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          /// Action Buttons
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 8,
-            ),
-
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _applying
-                        ? null
-                        : () {
-                      setState(() {
-                        _tempSelectedCompanyId =
-                            widget.provider.selectedCompanyId ?? -1;
-                        _tempAllowedCompanyIds = widget
-                            .provider
-                            .selectedAllowedCompanyIds
-                            .toSet();
-                      });
-                    },
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 36),
-                      padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      side: BorderSide(
-                        color: isDark ? Colors.white24 : Colors.grey[300]!,
-                      ),
-                    ),
-                    child: Text(
-                      'Reset',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
-                    ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: primaryColor,
+                  side: BorderSide(color: primaryColor, width: 1.2),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
                   ),
                 ),
+                child: const Text(
+                  'Reset',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryColor,
+                  ),
+                ),
+              ),
+            ),
+          ),
 
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      final noActiveChange = _tempSelectedCompanyId == widget.provider.selectedCompanyId;
-                      final noAllowedChange = _setEquals(
-                        _tempAllowedCompanyIds,
-                        widget.provider.selectedAllowedCompanyIds.toSet(),
-                      );
-                      final disabled = _applying || widget.provider.isSwitching || (noActiveChange && noAllowedChange);
-                      if (!disabled) {
-                        _onConfirm();
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 36),
-                      backgroundColor: primaryColor,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    ),
-                    child: _applying
-                        ? Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
-                              SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    Colors.white,
-                                  ),
-                                ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SizedBox(
+              height: 48,
+              child: ElevatedButton(
+                onPressed: () {
+                  final noActiveChange =
+                      _tempSelectedCompanyId ==
+                      widget.provider.selectedCompanyId;
+                  final noAllowedChange = _setEquals(
+                    _tempAllowedCompanyIds,
+                    widget.provider.selectedAllowedCompanyIds.toSet(),
+                  );
+                  final disabled =
+                      _applying ||
+                      widget.provider.isSwitching ||
+                      (noActiveChange && noAllowedChange);
+                  if (!disabled) {
+                    _onConfirm();
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  elevation: 0,
+                  backgroundColor: primaryColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                ),
+                child: _applying
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
                               ),
-                              SizedBox(width: 8),
-                              Text(
-                                'Applying...',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          )
-                        : const Text(
-                            'Confirm',
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Applying...',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                  ),
-                ),
-              ],
+                        ],
+                      )
+                    : const Text(
+                        'Confirm',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+              ),
             ),
           ),
         ],
+      ),
+    );
+
+    return Container(
+      width: widget.width ?? 280,
+      constraints: BoxConstraints(maxHeight: widget.maxHeight),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2D2D2D) : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      // The footer stays pinned under the list — unless the window (a phone in
+      // landscape with the keyboard up) leaves too little height for both, when
+      // it scrolls with the list instead of being squeezed out.
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final pinFooter = constraints.maxHeight >= _footerHeight + 96;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.provider.error != null)
+                Container(
+                  margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: StatusColors.red.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: StatusColors.red.withValues(alpha: 0.25),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        color: StatusColors.red,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          widget.provider.error!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              Flexible(
+                child: pinFooter
+                    ? ListView.builder(
+                        key: Key("listview"),
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: widget.provider.companies.length,
+                        itemBuilder: (context, index) => buildRow(index),
+                      )
+                    : ListView(
+                        key: Key("listview"),
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        children: [
+                          for (
+                            var i = 0;
+                            i < widget.provider.companies.length;
+                            i++
+                          )
+                            buildRow(i),
+                          footer,
+                        ],
+                      ),
+              ),
+
+              if (pinFooter) footer,
+            ],
+          );
+        },
       ),
     );
   }

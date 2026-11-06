@@ -4,6 +4,8 @@ import 'package:mobo_event/features/scheduler/model/template_model.dart';
 import '../model/event_mail_scheduler.dart';
 
 class MailSchedulerServices {
+
+  ///fetch the details from odoo
   Future<List<EventMailScheduler>> fetchCommunication(int eventId) async {
     try {
       final result = await OdooSessionManager.callKwWithCompany({
@@ -158,11 +160,12 @@ class MailSchedulerServices {
       return result
           .map((e) => TemplateModel.fromJson(e as Map<String, dynamic>))
           .toList();
-    } catch (e, st) {
+    } catch (_) {
       rethrow;
     }
   }
 
+  /// Attach mail to event
   Future<bool> attachMailToEvent({
     required int eventId,
     required List<dynamic> mailValues,

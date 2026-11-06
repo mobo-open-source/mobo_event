@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 
+///status helper function
 String statusString(String status) {
   if (status == "already_registered") {
     return "Ticket Already Scanned";
@@ -18,25 +20,27 @@ String statusString(String status) {
   return status;
 }
 
+///status helper function for color
 Color getColor(String state) {
   switch (state.toLowerCase()) {
     case 'already_registered':
-      return Colors.orange;
+      return StatusColors.orange;
     case 'confirmed_registration':
-      return Colors.green;
+      return StatusColors.green;
     case 'canceled_registration':
-      return Colors.red;
+      return StatusColors.red;
     case 'need_manual_confirmation':
-      return Colors.orange;
+      return StatusColors.orange;
 
     case 'not_ongoing_event':
-      return Colors.orange;
+      return StatusColors.orange;
 
     default:
-      return Colors.grey;
+      return StatusColors.grey;
   }
 }
 
+///state
 String getState(String state) {
   switch (state) {
     case 'draft':
@@ -55,18 +59,18 @@ String getState(String state) {
 Color getStateColor(String state) {
   switch (state) {
     case 'draft':
-      return Colors.orange;
+      return StatusColors.orange;
 
     case 'open':
-      return Colors.blue;
+      return StatusColors.blue;
 
     case 'done':
-      return Colors.green;
+      return StatusColors.green;
 
     case 'cancel':
-      return Colors.red;
+      return StatusColors.red;
 
     default:
-      return Colors.grey;
+      return StatusColors.grey;
   }
 }

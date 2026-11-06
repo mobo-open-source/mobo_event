@@ -1,8 +1,8 @@
-import 'dart:convert';
 import 'dart:typed_data';
 import 'package:intl/intl.dart';
+import 'package:mobo_event/core/utils/odoo_binary.dart';
 
-
+/// Model class for event details
 class EventDetailedModel {
   final int id;
   final String name;
@@ -39,7 +39,17 @@ class EventDetailedModel {
   final String? activityTypeIcon;
   final String? activitySummary;
   final bool isPublished;
-  final bool websitePublished;
+
+  /// `website_published` ("Visible on current website"). Null when the server
+  /// has no such field — it comes with `website_event`, so without that module
+  /// there is nothing to show or edit.
+  final bool? websitePublished;
+
+  /// Odoo 20's `publish_on`: when the event is set to go live by itself. While
+  /// it is set the event is unpublished and Odoo locks the Published toggle.
+  /// Null on 17–19, which have no scheduled publishing, and when nothing is
+  /// scheduled.
+  final DateTime? publishOn;
   final String websiteUrl;
   final String websiteAbsoluteUrl;
   final String visibility;
@@ -58,8 +68,6 @@ class EventDetailedModel {
   final List<dynamic>? website;
   final List<dynamic>? tagIds;
   final int seatTaken;
-
-
 
   EventDetailedModel({
 
@@ -110,10 +118,9 @@ class EventDetailedModel {
     this.note,
     this.tagIds,
 
-
-
     required this.isPublished,
-    required this.websitePublished,
+    this.websitePublished,
+    this.publishOn,
     required this.websiteUrl,
     required this.websiteAbsoluteUrl,
     required this.visibility,
@@ -128,7 +135,6 @@ class EventDetailedModel {
     if (v == null|| v== false) return '';
 
     String s = v.toString();
-
 
     s = s.replaceAll(RegExp(r'<[^>]*>'), '');
 
@@ -148,22 +154,14 @@ class EventDetailedModel {
   static bool _safeBool(dynamic v) => v is bool ? v : false;
   static bool? _safeBoolweb(dynamic v) => v is bool ? v : null;
 
+  /// A binary field is base64 text through Odoo 19 and a `{content, size}`
+  /// object from 20 — see [OdooBinary].
+  static Uint8List? _safeImage(dynamic v) => OdooBinary.bytes(v);
 
-
-
-  static Uint8List? _safeImage(dynamic v) {
-    if (v is String && v.isNotEmpty) {
-      try {
-        return base64Decode(v);
-      } catch (e) {
-      }
-    }
-    return null;
-  }
-
-
-
-
+  /// [_safeDate] for a field that may be unset: Odoo sends `false` then, and
+  /// a missing date must stay missing rather than become "now".
+  static DateTime? _safeDateOrNull(dynamic v) =>
+      v is String && v.isNotEmpty ? _safeDate(v) : null;
 
   static DateTime _safeDate(dynamic v) {
     try {
@@ -181,10 +179,63 @@ class EventDetailedModel {
 
         return DateTime.parse(cleaned).toLocal();
       }
-    } catch (e) {
-    }
+    } catch (_) {}
     return DateTime.now();
   }
+
+  /// The `event.event` columns [fromJson] reads. A read with no field list
+  /// returns every column — the HTML description, the registration, chatter
+  /// and track id lists, every computed field — and the server computes all of
+  /// them, none of which this model uses. Keep this in step with [fromJson].
+  static const readFields = <String>[
+    'display_name',
+    'name',
+    'date_begin',
+    'date_end',
+    'date_tz',
+    'address_name',
+    'address_id',
+    'address_inline',
+    'contact_address_inline',
+    'country_id',
+    'event_url',
+    'seats_taken',
+    'seats_max',
+    'seats_available',
+    'seats_limited',
+    'event_slot_count',
+    'is_multi_slots',
+    'organizer_id',
+    'user_id',
+    'company_id',
+    'website_id',
+    'event_type_id',
+    'tag_ids',
+    'lang',
+    'stage_id',
+    'kanban_state',
+    'activity_ids',
+    'activity_state',
+    'activity_type_id',
+    'activity_type_icon',
+    'activity_summary',
+    'is_published',
+    'website_published',
+    'publish_on',
+    'website_url',
+    'website_absolute_url',
+    'website_visibility',
+    'website_menu',
+    'booth_menu',
+    'website_track',
+    'website_track_proposal',
+    'exhibitor_menu',
+    'image_1024',
+    'badge_format',
+    'badge_image',
+    'ticket_instructions',
+    'note',
+  ];
 
   factory EventDetailedModel.fromJson(Map<String, dynamic> json) {
     return EventDetailedModel(
@@ -216,7 +267,12 @@ class EventDetailedModel {
       activityTypeIcon: _safeNullableString(json['activity_type_icon']),
       activitySummary: _safeNullableString(json['activity_summary']),
       isPublished: _safeBool(json['is_published']),
-      websitePublished: _safeBool(json['website_published']),
+      // `is_published` is what `website_published` mirrors; it answers when
+      // only that one is on the record.
+      websitePublished: _safeBoolweb(
+        json['website_published'] ?? json['is_published'],
+      ),
+      publishOn: _safeDateOrNull(json['publish_on']),
       websiteUrl: _safeString(json['website_url']),
       websiteAbsoluteUrl: _safeString(json['website_absolute_url']),
       seatTaken: json['seats_taken'],
@@ -225,7 +281,10 @@ class EventDetailedModel {
       template: json['event_type_id'] is List ? json['event_type_id'][1] : '',
       timezone: _safeString(json['date_tz']),
       venueName: _safeString(json['address_name']),
-      venueAddress: _safeString(json['address_inline']),
+      // Odoo 20 renamed event.event.address_inline to contact_address_inline.
+      venueAddress: _safeString(
+        json['contact_address_inline'] ?? json['address_inline'],
+      ),
       country: json['country_id'] is List ? json['country_id'][1] : '',
       image: _safeImage(json['image_1024']!= false ?json['image_1024']:null ),
       language: json['lang'] is String ? json['lang'] : null,
@@ -243,10 +302,6 @@ class EventDetailedModel {
       tagIds: json['tag_ids'] is List ? json['tag_ids'] : [],
       startWithTimezone: DateTime.parse(json['date_begin']),
       endWithTimezone: DateTime.parse(json['date_end']),
-
-
-
-
     );
   }
 }
@@ -262,4 +317,14 @@ extension EventDetailedModelFormat on EventDetailedModel {
       maxSeats == 0 ? "$attended / ∞" : "$attended / $maxSeats";
 
   bool get hasActivity => activityState != null;
+
+  /// Whether the event is live on the website. False both when it is hidden
+  /// and when the server cannot publish at all — see [hasPublishState].
+  bool get isLive => websitePublished == true;
+
+  /// Whether this server publishes events at all (needs `website_event`).
+  bool get hasPublishState => websitePublished != null;
+
+  /// A publish date is set and has not been reached (Odoo 20).
+  bool get isPublishScheduled => !isLive && publishOn != null;
 }

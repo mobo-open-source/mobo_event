@@ -58,4 +58,11 @@ class EventQuestion {
     );
   }
 
+  /// Compared by record id, so a picker recognises the value it was handed
+  /// among options it loaded itself (a separate object for the same record).
+  @override
+  bool operator ==(Object other) => other is EventQuestion && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
 }

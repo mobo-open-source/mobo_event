@@ -1,4 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/screen_layout.dart';
 
 class SearchableTimezoneDropdown extends StatefulWidget {
   final List<String> timezones;
@@ -28,14 +32,26 @@ class _SearchableTimezoneDropdownState
   }
 
   void _openSearchSheet() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final result = await showModalBottomSheet<String>(
-      backgroundColor: Colors.white,
+      // §19 — the sheet itself is transparent; the inner Container supplies
+      // the background and the top-only rounding.
+      backgroundColor: Colors.transparent,
       context: context,
       isScrollControlled: true,
       builder: (context) {
-        return _TimezoneSearchSheet(
-          timezones: widget.timezones,
-          selected: selectedTimezone,
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkSurface : Colors.grey[50],
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(AppRadius.lg),
+            ),
+          ),
+          clipBehavior: Clip.hardEdge,
+          child: _TimezoneSearchSheet(
+            timezones: widget.timezones,
+            selected: selectedTimezone,
+          ),
         );
       },
     );
@@ -50,21 +66,19 @@ class _SearchableTimezoneDropdownState
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: _openSearchSheet,
       child: InputDecorator(
-        decoration:  InputDecoration(
+        decoration: InputDecoration(
           hintText: "Search your TimeZone",
           filled: true,
-          fillColor: const Color(0xFFF1F3F5),
+          fillColor: AppTheme.inputFill(isDark),
 
-          hintStyle: TextStyle(
-              color: Colors.grey,
-              fontSize: 14
-          ),
+          hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            borderSide: AppTheme.restingBorderSide(isDark),
           ),
           suffixIcon: Icon(Icons.arrow_drop_down),
         ),
@@ -73,32 +87,27 @@ class _SearchableTimezoneDropdownState
           style: TextStyle(
             color: selectedTimezone == null
                 ? Colors.grey
-                : Colors.black,
+                : (isDark ? Colors.white : Colors.black),
           ),
         ),
       ),
     );
   }
 }
+
 class _TimezoneSearchSheet extends StatefulWidget {
   final List<String> timezones;
   final String? selected;
 
-  const _TimezoneSearchSheet({
-    required this.timezones,
-    this.selected,
-  });
+  const _TimezoneSearchSheet({required this.timezones, this.selected});
 
   @override
-  State<_TimezoneSearchSheet> createState() =>
-      _TimezoneSearchSheetState();
+  State<_TimezoneSearchSheet> createState() => _TimezoneSearchSheetState();
 }
 
-class _TimezoneSearchSheetState
-    extends State<_TimezoneSearchSheet> {
+class _TimezoneSearchSheetState extends State<_TimezoneSearchSheet> {
   late List<String> filteredList;
-  final TextEditingController controller =
-  TextEditingController();
+  final TextEditingController controller = TextEditingController();
 
   @override
   void initState() {
@@ -109,43 +118,48 @@ class _TimezoneSearchSheetState
   void _filter(String query) {
     setState(() {
       filteredList = widget.timezones
-          .where((tz) =>
-          tz.toLowerCase().contains(query.toLowerCase()))
+          .where((tz) => tz.toLowerCase().contains(query.toLowerCase()))
           .toList();
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Half the window upright. On its side that leaves ~150dp, too little
+    // for the search box plus a usable list, so it takes nearly all of it.
+    // Either way it is held to what is left above the keyboard (the padding
+    // below), so the list shrinks and scrolls instead of overflowing.
+    final media = MediaQuery.of(context);
+    final short = context.isShortScreen;
+    final available = media.size.height - media.viewInsets.bottom;
+    final sheetHeight = math.min(
+      media.size.height * (short ? 0.9 : 0.5),
+      available,
+    );
     return SafeArea(
       child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
+        padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
         child: SizedBox(
-
-          height: MediaQuery.of(context).size.height * 0.5,
+          height: sheetHeight,
           child: Column(
             children: [
-              const SizedBox(height: 30),
+              SizedBox(height: short ? 12 : 30),
 
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: TextField(
                   controller: controller,
                   onChanged: _filter,
-                  decoration:  InputDecoration(
+                  decoration: InputDecoration(
                     hintText: "Search your TimeZone",
                     filled: true,
-                    fillColor: const Color(0xFFF1F3F5),
+                    fillColor: AppTheme.inputFill(isDark),
 
-                    hintStyle: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 14
-                    ),
+                    hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      borderSide: AppTheme.restingBorderSide(isDark),
                     ),
                   ),
                 ),
@@ -163,8 +177,7 @@ class _TimezoneSearchSheetState
                     return ListTile(
                       title: Text(tz),
                       trailing: isSelected
-                          ? const Icon(Icons.check,
-                          color: Colors.green)
+                          ? const Icon(Icons.check, color: StatusColors.green)
                           : null,
                       onTap: () {
                         Navigator.pop(context, tz);

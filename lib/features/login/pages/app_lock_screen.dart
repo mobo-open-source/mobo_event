@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../core/services/biometric_service.dart';
+import '../../../core/utils/screen_layout.dart';
+import 'login_layout.dart';
 
 /// App lock screen that prompts for biometric authentication
 /// Displayed when app is locked and biometric authentication is enabled
@@ -24,7 +27,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
   @override
   void initState() {
     super.initState();
-    /// Authenticate immediately when screen loads
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _performAuthentication();
     });
@@ -39,7 +42,6 @@ class _AppLockScreenState extends State<AppLockScreen> {
     });
 
     try {
-      /// Check if biometric is available first
       final isAvailable = await BiometricService.isBiometricAvailable();
       if (!isAvailable) {
         if (mounted) {
@@ -68,7 +70,6 @@ class _AppLockScreenState extends State<AppLockScreen> {
             _errorMessage = null;
           });
 
-          /// Call the callback to notify parent widget
           widget.onAuthenticationSuccess?.call();
         } else {
           setState(() {
@@ -89,82 +90,97 @@ class _AppLockScreenState extends State<AppLockScreen> {
     }
   }
 
+  /// What the lock is currently doing: waiting, retrying, or the initial hint.
+  Widget _buildAuthDisplay() {
+    if (_isAuthenticating) return _buildAuthenticatingDisplay();
+    if (_authenticationFailed) return _buildRetryButton();
+    return _buildInitialDisplay();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // On a phone on its side there is no room for a header pinned above the
+    // status, so the brand, heading and status scroll together as one page.
+    final compact = context.isLandscape && context.isShortScreen;
 
     return Scaffold(
       body: Stack(
         children: [
-          /// Background
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
-                 image: DecorationImage(
-                  ///set your login image
+                image: DecorationImage(
                   image: const AssetImage('assets/images/loginbg.png'),
                   fit: BoxFit.cover,
-
                 ),
               ),
             ),
           ),
 
-          /// Main content
-          LayoutBuilder(
-            builder: (context, viewportConstraints) {
-              return Column(
-                children: [
-                  /// App name and logo at the top
-                  SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 68),
-                      child: _buildAppHeader(),
+          if (compact)
+            Positioned.fill(
+              child: LoginCompactBody(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FittedBox(fit: BoxFit.scaleDown, child: _buildAppHeader()),
+                    const SizedBox(height: 16),
+                    _buildAuthHeader(),
+                    const SizedBox(height: 24),
+                    _buildAuthDisplay(),
+                  ],
+                ),
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, viewportConstraints) {
+                return Column(
+                  children: [
+                    SafeArea(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 68),
+                        child: _buildAppHeader(),
+                      ),
                     ),
-                  ),
 
-                  /// Scrollable content area for authentication
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minHeight: viewportConstraints.maxHeight - 180,
-                        ),
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 400),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24.0,
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  /// Authentication header
-                                  _buildAuthHeader(),
-                                  const SizedBox(height: 24),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: math.max(
+                              0,
+                              viewportConstraints.maxHeight - 180,
+                            ),
+                          ),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 400),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24.0,
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildAuthHeader(),
+                                    const SizedBox(height: 24),
 
-                                  /// Authentication content
-                                  if (_isAuthenticating)
-                                    _buildAuthenticatingDisplay()
-                                  else if (_authenticationFailed)
-                                    _buildRetryButton()
-                                  else
-                                    _buildInitialDisplay(),
-                                ],
+                                    _buildAuthDisplay(),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              );
-            },
-          ),
+                  ],
+                );
+              },
+            ),
         ],
       ),
     );
@@ -176,22 +192,20 @@ class _AppLockScreenState extends State<AppLockScreen> {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Image.asset(
-          "assets/Icon.png",
-          width: 50,
-          height: 50,
+          "assets/app_logo.png",
+          width: 32,
+          height: 32,
           fit: BoxFit.contain,
-
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 12),
         Text(
-          'mobo expenses',
+          'mobo event',
           style: const TextStyle(
             fontFamily: 'MyFont',
             color: Colors.white,
-            fontSize: 28,
+            fontSize: 24,
           ),
         ),
-
       ],
     );
   }
@@ -200,10 +214,9 @@ class _AppLockScreenState extends State<AppLockScreen> {
   Widget _buildAuthHeader() {
     return Column(
       children: [
-        /// "App Locked" text
         Text(
           'App Locked',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.manrope(
             fontWeight: FontWeight.w600,
             color: Colors.white,
             fontSize: 22,
@@ -212,10 +225,9 @@ class _AppLockScreenState extends State<AppLockScreen> {
         ),
         const SizedBox(height: 8),
 
-        /// Subtitle text
         Text(
           'Please authenticate to continue',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.manrope(
             color: Colors.white70,
             fontSize: 14,
             fontWeight: FontWeight.w400,
@@ -240,7 +252,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
         const SizedBox(height: 16),
         Text(
           'Authenticating...',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.manrope(
             color: Colors.white70,
             fontSize: 16,
             fontWeight: FontWeight.w500,
@@ -258,7 +270,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const HugeIcon(
-              icon:   HugeIcons.strokeRoundedAlertCircle,
+                icon: HugeIcons.strokeRoundedAlertCircle,
                 color: Colors.white,
                 size: 18,
               ),
@@ -266,7 +278,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
               Expanded(
                 child: Text(
                   _errorMessage!,
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.manrope(
                     color: Colors.white,
                     fontSize: 12,
                     fontWeight: FontWeight.w400,
@@ -298,7 +310,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
             ),
             child: Text(
               'Try Again',
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.manrope(
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
               ),
@@ -312,11 +324,15 @@ class _AppLockScreenState extends State<AppLockScreen> {
   Widget _buildInitialDisplay() {
     return Column(
       children: [
-        Icon(Icons.fingerprint, size: 48, color: Colors.white.withOpacity(0.8)),
+        Icon(
+          Icons.fingerprint,
+          size: 48,
+          color: Colors.white.withValues(alpha: 0.8),
+        ),
         const SizedBox(height: 16),
         Text(
           'Touch sensor or use face unlock',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.manrope(
             color: Colors.white70,
             fontSize: 14,
             fontWeight: FontWeight.w400,

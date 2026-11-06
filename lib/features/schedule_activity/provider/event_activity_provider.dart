@@ -10,6 +10,7 @@ class EventActivityProvider extends ChangeNotifier {
   bool isLoading = true;
   List<ActivitiesModel> activityList = [];
 
+  ///fetch the activities
   Future<void> fetchActivities(List<dynamic> activitiesId) async {
     try {
        isLoading = true;
@@ -30,7 +31,7 @@ class EventActivityProvider extends ChangeNotifier {
       activityList = [];
       isLoading = false;
       notifyListeners();
-    } catch (e) {
+    } catch (_) {
       isLoading = false;
       notifyListeners();
       rethrow;

@@ -13,4 +13,13 @@ class UserModel {
       name: json['name'] ?? '',
     );
   }
+
+  /// Records are the same user when their ids match, so a picker recognises
+  /// the selected one among freshly loaded options.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is UserModel && other.id == id);
+
+  @override
+  int get hashCode => id.hashCode;
 }

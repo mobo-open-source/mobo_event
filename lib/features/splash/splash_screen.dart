@@ -2,7 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:mobo_event/app/app_entry.dart';
 import 'package:video_player/video_player.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mobo_event/core/utils/screen_layout.dart';
 import 'package:mobo_event/features/onboarding/get_started_screen.dart';
+
+/// The flat colour behind the splash video's logo, sampled from its frames.
+/// Used as the window colour when the portrait video is letterboxed, so the
+/// bars on either side read as part of the picture.
+const Color _splashVideoBackground = Color(0xFFB02254);
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -74,11 +80,16 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // The video is a tall portrait clip. Filling a landscape window with it
+    // would crop it to a thin horizontal slice and cut the logo in half, so
+    // there it is shown whole and centred over its own background colour.
+    final landscape = context.isLandscape;
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: landscape ? _splashVideoBackground : Colors.black,
       body: SizedBox.expand(
         child: FittedBox(
-          fit: BoxFit.cover,
+          fit: landscape ? BoxFit.contain : BoxFit.cover,
           child: SizedBox(
             width: _controller.value.isInitialized
                 ? _controller.value.size.width

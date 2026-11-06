@@ -1,8 +1,7 @@
-import 'package:flutter/animation.dart';
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 
-import '../../core/const/app_colors.dart';
+import '../../core/theme/app_theme.dart';
 
 IconData getKanbanIcon(String? state) {
   switch (state) {
@@ -19,26 +18,46 @@ IconData getKanbanIcon(String? state) {
   }
 }
 
+/// Short label for the kanban-state status capsule (event_short_card).
+String getKanbanLabel(String? state) {
+  switch (state) {
+    case 'done':
+      return 'Ready';
+    case 'normal':
+      return 'In Progress';
+    case 'blocked':
+      return 'Blocked';
+    case 'cancel':
+      return 'Cancelled';
+    default:
+      return 'Unknown';
+  }
+}
+
 Color getKanbanColor(String kanbanState) {
   switch (kanbanState.toLowerCase()) {
+    // "In Progress" — CLAUDE.md §1's semantic table calls this one out by
+    // name: blue for "in-progress/proposal", not the grey fallback.
     case 'normal':
-      return Colors.grey;
+      return StatusColors.blue;
     case 'done':
-      return Colors.green;
+      return StatusColors.green;
     case 'blocked':
-      return Colors.orange;
+      return StatusColors.orange;
     case 'cancel':
-      return Colors.red;
+      return StatusColors.red;
     default:
-      return Colors.grey;
+      return StatusColors.grey;
   }
 }
 
 Widget getIcont(String? iconName, String? iconstate) {
+  // Nothing scheduled yet: the calendar is the way in to schedule something,
+  // so it carries the brand colour rather than a disabled-looking grey.
   if (iconName == null || iconName == 'false' || iconstate == null) {
     return const HugeIcon(
-      icon: HugeIcons.strokeRoundedClock01,
-      color: Colors.grey,
+      icon: HugeIcons.strokeRoundedCalendar03,
+      color: AppTheme.primaryColor,
       size: 20,
     );
   }
@@ -60,7 +79,7 @@ Widget getIcont(String? iconName, String? iconstate) {
 
     default:
       return HugeIcon(
-        icon: HugeIcons.strokeRoundedClock01,
+        icon: HugeIcons.strokeRoundedCalendar03,
         size: 20,
         color: getColor(iconstate),
       );
@@ -69,29 +88,39 @@ Widget getIcont(String? iconName, String? iconstate) {
 
 Color getColor(String? kanbanState) {
   if (kanbanState == null) {
-    return backgroundColor;
+    // Was the page background (#F3F3F3) used as an icon tint — nearly
+    // invisible on the light-mode surface it sits on. The other unknown/
+    // fallback branch below already uses the right neutral for this.
+    return StatusColors.grey;
   }
   switch (kanbanState.toLowerCase()) {
     case 'today':
-      return Colors.orange;
+      return StatusColors.orange;
     case 'planned':
-      return Colors.green;
+      return StatusColors.green;
     case 'overdue':
-      return Colors.red;
+      return StatusColors.red;
     case 'cancel':
-      return Colors.red;
+      return StatusColors.red;
     default:
-      return Colors.grey;
+      return StatusColors.grey;
   }
 }
 
 String cleanedError(String error) {
   final errorMessage = error
       .toString()
+      .replaceFirst("Exception: ", "")
       .split("message:")
       .last
       .split(",")
       .first
       .trim();
+  // Raw Dart type/null errors mean an unexpected server payload; don't show them.
+  if (errorMessage.contains('is not a subtype of type') ||
+      errorMessage.contains('Null check operator') ||
+      errorMessage.startsWith('NoSuchMethodError')) {
+    return 'Something went wrong. Please check the details and try again.';
+  }
   return errorMessage;
 }

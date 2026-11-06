@@ -13,4 +13,13 @@ class ActivityTypeModel {
       name: json['name'] ?? '',
     );
   }
+
+  /// Records are the same activity type when their ids match, so a picker
+  /// recognises the selected one among freshly loaded options.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is ActivityTypeModel && other.id == id);
+
+  @override
+  int get hashCode => id.hashCode;
 }

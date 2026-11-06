@@ -1,4 +1,3 @@
-
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,10 +33,9 @@ class BiometricService {
      final bool canCheckBiometrics = await _localAuth!.canCheckBiometrics;
 
       return canCheckBiometrics;
-    } on PlatformException catch (e) {
-
+    } on PlatformException {
       return false;
-    } catch (e) {
+    } catch (_) {
         return false;
     }
   }
@@ -49,7 +47,7 @@ class BiometricService {
       if (_localAuth == null) return [];
 
       return await _localAuth!.getAvailableBiometrics();
-    } catch (e) {
+    } catch (_) {
        return [];
     }
   }
@@ -92,22 +90,9 @@ class BiometricService {
       );
 
       return didAuthenticate;
-    } on PlatformException catch (e) {
-
-      /// Handle specific error cases
-      switch (e.code) {
-        case 'NotAvailable':
-          break;
-        case 'NotEnrolled':
-          break;
-        case 'LockedOut':
-          break;
-        case 'PermanentlyLockedOut':
-           break;
-        default:
-           }
+    } on PlatformException {
       return false;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
@@ -145,7 +130,7 @@ class BiometricService {
 
       final isAvailable = await isBiometricAvailable();
       return isAvailable;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
@@ -174,9 +159,8 @@ class BiometricService {
   static Future<void> initialize() async {
     try {
       await _ensureInitialized();
-      /// Pre-initialize the local auth instance
+      // Pre-initialize the local auth instance
       await _localAuth?.isDeviceSupported();
-       } catch (e) {
-      }
+    } catch (_) {}
   }
 }

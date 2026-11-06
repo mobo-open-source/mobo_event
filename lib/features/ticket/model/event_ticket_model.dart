@@ -51,6 +51,8 @@ class EventTicket {
     this.priceIncl,
   });
 
+  static double? _asDouble(dynamic v) => v is num ? v.toDouble() : null;
+
   static DateTime? _safeDate(dynamic v) {
     try {
       String? dateStr;
@@ -64,10 +66,35 @@ class EventTicket {
       if (dateStr != null) {
         return DateTime.parse(dateStr.replaceAll(' ', 'T'));
       }
-    } catch (e) {
-      }
+    } catch (_) {}
     return null;
   }
+
+  /// The `event.event.ticket` columns [fromJson] reads. A read with no field
+  /// list also returns the ticket's registration id list, which grows with
+  /// every attendee. Keep this in step with [fromJson].
+  static const readFields = <String>[
+    'display_name',
+    'name',
+    'description',
+    'seats_limited',
+    'seats_max',
+    'seats_available',
+    'seats_used',
+    'seats_taken',
+    'product_id',
+    'price',
+    'price_reduce',
+    'price_reduce_taxinc',
+    'total_price_reduce_taxinc',
+    'price_incl',
+    'total_price_incl',
+    'start_sale_datetime',
+    'end_sale_datetime',
+    'sale_available',
+    'limit_max_per_order',
+    'color',
+  ];
 
   factory EventTicket.fromJson(Map<String, dynamic> json) {
     final List<dynamic>? prod = json['product_id'];
@@ -110,13 +137,13 @@ class EventTicket {
       limitMaxPerOrder: json['limit_max_per_order'],
       color: json['color'],
 
-      priceReduceTaxInc: (json['price_reduce_taxinc'] != null)
-          ? (json['price_reduce_taxinc'] as num).toDouble()
-          : null,
+      // Odoo 20 (event_product) renamed these to total_price_reduce_taxinc and
+      // total_price_incl.
+      priceReduceTaxInc: _asDouble(
+        json['total_price_reduce_taxinc'] ?? json['price_reduce_taxinc'],
+      ),
 
-      priceIncl: (json['price_incl'] != null)
-          ? (json['price_incl'] as num).toDouble()
-          : null,
+      priceIncl: _asDouble(json['total_price_incl'] ?? json['price_incl']),
     );
   }
 }

@@ -5,7 +5,10 @@ import 'package:mobo_event/shared/widgets/snackbars/custom_snackbar.dart';
 
 import 'package:provider/provider.dart';
 import '../../../core/const/app_colors.dart';
-import '../../../shared/widgets/action_button.dart';
+import '../../../core/services/event_access_rights.dart';
+import '../../../core/utils/screen_layout.dart';
+import '../../../shared/widgets/dialogs/common_dialog.dart';
+import '../../../shared/widgets/section_list_state.dart';
 import '../../../shared/widgets/loading/loading_widget.dart';
 import '../../../shared/widgets/shimmer_card/shimmer_card.dart';
 import '../provider/mail_scheduler_provider.dart';
@@ -20,38 +23,44 @@ class MailScheduler extends StatefulWidget {
   State<MailScheduler> createState() => _MailSchedulerState();
 }
 
+/// Nothing is fetched here: the Details screen loads the scheduled mails
+/// together with the rest of the event, and reloads them on refresh.
 class _MailSchedulerState extends State<MailScheduler> {
-  @override
-  void initState() {
-    super.initState();
-    Future.microtask(() {
-      context.read<MailSchedulerProvider>().fetchScheduledMail(widget.eventId);
-    });
+  void _addCommunication() {
+    showDialog(
+      context: context,
+      builder: (_) => MailScheduleDialog(eventId: widget.eventId),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    // No side padding, same as the Tickets tab's — otherwise its header and
+    // cards sit narrower than the Tickets tab's and don't line up with it.
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.only(left: 10, right: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Scheduled Information",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-
-          const SizedBox(height: 20),
-
-          Expanded(
-            child: Consumer<MailSchedulerProvider>(
-              builder: (context, provider, child) {
-                return buildContent(provider, context);
-              },
-            ),
-          ),
-        ],
+      child: Consumer<MailSchedulerProvider>(
+        builder: (context, provider, child) {
+          final hasMails =
+              !provider.loading && provider.scheduledMails.isNotEmpty;
+          // A scheduler is attached through the event's `event_mail_ids`:
+          // adding one needs create on `event.mail` and write on the event.
+          final canAdd = context.watch<AccessRights>().canAddScheduler;
+          final page = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SectionHeader(
+                title: "Scheduled Information",
+                onAdd: hasMails && canAdd ? _addCommunication : null,
+              ),
+              const SizedBox(height: 16),
+              Expanded(child: buildContent(provider, context)),
+            ],
+          );
+          // One scrolling column; on a wide landscape window it is capped and
+          // centred rather than stretched across the whole width.
+          return context.isLandscape ? ConstrainedContent(child: page) : page;
+        },
       ),
     );
   }
@@ -86,81 +95,61 @@ class _MailSchedulerState extends State<MailScheduler> {
                 return MailScheduleCard(
                   eventId: widget.eventId,
                   mail: provider.scheduledMails[index],
-                  onDelete: () async {
-                    try {
-                      loadingDialog(
-                        context,
-                        "Deleting ",
-                        "Please wait...",
-                        LoadingAnimationWidget.fourRotatingDots(
-                          color: primaryColor,
-                          size: 30,
-                        ),
-                      );
+                  onDelete: !context.watch<AccessRights>().canDeleteScheduler
+                      ? null
+                      : () async {
+                          final mail = provider.scheduledMails[index];
+                          final confirm = await CommonDialog.confirm(
+                            context,
+                            title: 'Delete Reminder',
+                            message:
+                                'Are you sure you want to delete "${mail.templateName?.isNotEmpty == true ? mail.templateName : 'this reminder'}"?',
+                            confirmText: 'Delete',
+                          );
+                          if (confirm != true || !context.mounted) return;
 
-                      await provider.deleteTicket(
-                        provider.scheduledMails[index].id,
-                      );
+                          try {
+                            loadingDialog(
+                              context,
+                              "Deleting ",
+                              "Please wait...",
+                              LoadingAnimationWidget.fourRotatingDots(
+                                color: primaryColor,
+                                size: 30,
+                              ),
+                            );
 
-                      hideLoadingDialog(context);
-                      await provider.fetchScheduledMail(widget.eventId);
-                    } catch (e) {
-                      hideLoadingDialog(context);
+                            await provider.deleteTicket(mail.id);
 
-                      CustomSnackbar.showError(context, "Error while deleting");
-                    }
-                  },
+                            hideLoadingDialog(context);
+                            await provider.fetchScheduledMail(widget.eventId);
+                          } catch (e) {
+                            hideLoadingDialog(context);
+
+                            CustomSnackbar.showError(
+                              context,
+                              "Error while deleting",
+                            );
+                          }
+                        },
                 );
               },
             ),
-
-            actionButton(
-              label: "Add Communication",
-              icon: HugeIcons.strokeRoundedAdd01,
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (_) => MailScheduleDialog(eventId: widget.eventId),
-                );
-              },
-            ),
-            SizedBox(height: 30),
           ],
         ),
       );
     }
 
     if (provider.scheduledMails.isEmpty) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 100),
-              const HugeIcon(
-                icon: HugeIcons.strokeRoundedBubbleChat,
-                size: 60,
-                color: Colors.grey,
-              ),
-              const SizedBox(height: 16),
-              const Text("No Scheduled Information found"),
-              const SizedBox(height: 6),
-              const SizedBox(height: 16),
-
-              _actionButton(
-                label: "Create Communication",
-                icon: HugeIcons.strokeRoundedAdd01,
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (_) => MailScheduleDialog(eventId: widget.eventId),
-                  );
-                },
-              ),
-            ],
-          ),
-        ],
+      return CenteredSectionBody(
+        child: EmptySectionState(
+          icon: HugeIcons.strokeRoundedBubbleChat,
+          title: "No communications yet",
+          actionLabel: "Add Communication",
+          onAction: context.watch<AccessRights>().canAddScheduler
+              ? _addCommunication
+              : null,
+        ),
       );
     }
     return SingleChildScrollView(
@@ -174,26 +163,6 @@ class _MailSchedulerState extends State<MailScheduler> {
           SizedBox(height: 10),
           FullCardShimmer(height: 100, radius: 5),
         ],
-      ),
-    );
-  }
-
-  Widget _actionButton({
-    required String label,
-    required List<List<dynamic>> icon,
-    required VoidCallback onPressed,
-  }) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: HugeIcon(icon: icon, size: 16),
-      label: Text(label),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-        elevation: 0,
-        textStyle: const TextStyle(fontSize: 12),
       ),
     );
   }

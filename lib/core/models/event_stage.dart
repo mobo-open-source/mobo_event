@@ -25,7 +25,6 @@ class EventStage {
     this.writeDate,
   });
 
-
   factory EventStage.fromJson(Map<String, dynamic> json) {
     return EventStage(
       id: json['id'],

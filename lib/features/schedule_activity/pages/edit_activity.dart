@@ -1,12 +1,18 @@
+import 'package:hugeicons/hugeicons.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mobo_event/core/const/app_colors.dart';
+import 'package:mobo_event/core/theme/app_theme.dart';
+import 'package:mobo_event/core/utils/screen_layout.dart';
 import 'package:mobo_event/features/schedule_activity/services/event_activity_services.dart';
 import 'package:mobo_event/shared/widgets/snackbars/custom_snackbar.dart';
 import 'package:provider/provider.dart';
 
+import '../../../shared/widgets/forms/field_label.dart';
+import '../../../shared/widgets/forms/mobo_select_field.dart';
 import '../../../shared/widgets/loading/loading_widget.dart';
+import '../../event/widget/field.dart';
 import '../../home/providers/home_provider.dart';
 import '../model/activity_type.dart';
 import '../model/activities_model.dart';
@@ -25,13 +31,15 @@ class _EditActivityDialogState extends State<EditActivityDialog> {
   late TextEditingController summaryController;
   late TextEditingController noteController;
   late TextEditingController activityDateController;
-  late TextEditingController activitySearchController;
-  late TextEditingController assigneesSearchController;
 
   ActivityTypeModel? selectedActivity;
   UserModel? selectedUser;
 
   final _service = EventActivityServices();
+
+  /// What the dialog held when it opened. Update stays disabled until the
+  /// current values differ from it.
+  late final Map<String, Object?> _initialValues;
 
   @override
   void initState() {
@@ -53,14 +61,10 @@ class _EditActivityDialogState extends State<EditActivityDialog> {
     activityDateController = TextEditingController(
       text: widget.activiy.duedate ?? "",
     );
-    activitySearchController = TextEditingController(
-      text: widget.activiy.activityType[1],
-    );
-    assigneesSearchController = TextEditingController(
-      text: widget.activiy.userId[1],
-    );
 
     activityDateController.addListener(() => setState(() {}));
+    noteController.addListener(() => setState(() {}));
+    _initialValues = _currentValues();
   }
 
   bool get isFormValid =>
@@ -69,107 +73,124 @@ class _EditActivityDialogState extends State<EditActivityDialog> {
       activityDateController.text.isNotEmpty &&
       summaryController.text.trim().isNotEmpty;
 
+  /// Every value Update writes, reduced to something `==` can compare.
+  Map<String, Object?> _currentValues() => {
+    'activityType': selectedActivity?.id,
+    'user': selectedUser?.id,
+    'summary': summaryController.text.trim(),
+    'date': activityDateController.text,
+    'note': noteController.text.trim(),
+  };
+
+  bool get canSubmit =>
+      isFormValid && !mapEquals(_currentValues(), _initialValues);
+
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // A phone in landscape is only ~300-400dp tall: short windows trim the
+    // dialog's outer inset and the title / footer padding so the fields (which
+    // scroll) keep as much room as possible, also with the keyboard up.
+    final compact = context.isShortScreen;
     return Dialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: SingleChildScrollView(
-        child: Column(
-          children: [
-            _header(),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _activityField(),
-                  const SizedBox(height: 15),
-                  _userField(),
-                  const SizedBox(height: 15),
-                  const Text("Summary", style: TextStyle(color: Colors.grey)),
-                  SizedBox(height: 5),
-                  TextField(
-                    controller: summaryController,
-                    onChanged: (value) {
-                      setState(() {
-                        summaryController.text = value;
-                      });
-                    },
-                    decoration: InputDecoration(
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(5),
-                        borderSide: const BorderSide(
-                          color: Colors.grey,
-                          width: 0.5,
-                        ),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(5),
-                        borderSide: const BorderSide(
-                          color: primaryColor,
-
-                          width: 1,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 15),
-                  const Text("Date", style: TextStyle(color: Colors.grey)),
-                  SizedBox(height: 5),
-                  _dateField(context),
-                  const SizedBox(height: 15),
-                  const Text("Note", style: TextStyle(color: Colors.grey)),
-                  SizedBox(height: 5),
-                  TextField(
-                    controller: noteController,
-                    decoration: InputDecoration(
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(5),
-                        borderSide: const BorderSide(
-                          color: Colors.grey,
-                          width: 0.5,
-                        ),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(5),
-                        borderSide: const BorderSide(
-                          color: primaryColor,
-
-                          width: 1,
-                        ),
-                      ),
-                      hintText: "Log note....",
-                      hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
-                    ),
-                  ),
-                  const SizedBox(height: 25),
-                  _submitButton(context),
-                  SizedBox(height: 20),
-                ],
-              ),
-            ),
-          ],
-        ),
+      backgroundColor: AppTheme.surface(isDark),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: compact
+          ? const EdgeInsets.symmetric(horizontal: 40, vertical: 8)
+          : null,
+      child: LayoutBuilder(
+        builder: (context, constraints) =>
+            _content(context, constraints.maxHeight),
       ),
     );
   }
 
-  Widget _header() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-    decoration: BoxDecoration(color: primaryColor.withAlpha(20)),
+  Widget _content(BuildContext context, double avail) {
+    final compact = context.isShortScreen;
+    // Height the dialog really has: the window minus the keyboard and insets.
+    // Under 190 even the portrait recipe cannot fit header + footer, and under
+    // 124 a pinned footer would leave the fields less than a field's height,
+    // so the footer then scrolls with the fields instead of being pinned.
+    final dense = compact || avail < 190;
+    final tiny = dense && avail < 124;
+
+    final footer = Padding(
+      padding: dense
+          ? const EdgeInsets.fromLTRB(20, 6, 20, 10)
+          : const EdgeInsets.fromLTRB(20, 12, 20, 20),
+      child: _submitButton(context),
+    );
+
+    // The fields scroll; Update stays pinned at the bottom of the dialog.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: SingleChildScrollView(
+            keyboardDismissBehavior: dense
+                ? ScrollViewKeyboardDismissBehavior.onDrag
+                : ScrollViewKeyboardDismissBehavior.manual,
+            child: Column(
+              children: [
+                _header(dense),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 10,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _activityField(),
+                      const SizedBox(height: 15),
+                      _userField(),
+                      const SizedBox(height: 15),
+                      const FieldLabel("Summary", isRequired: true),
+                      const SizedBox(height: 8),
+                      Field(
+                        controller: summaryController,
+                        hint: "eg: Discuss proposal",
+                        // Required, so Update re-checks on every keystroke.
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 15),
+                      const FieldLabel("Date", isRequired: true),
+                      const SizedBox(height: 8),
+                      _dateField(context),
+                      const SizedBox(height: 15),
+                      const FieldLabel("Note"),
+                      const SizedBox(height: 8),
+                      Field(controller: noteController, hint: "Log note..."),
+                    ],
+                  ),
+                ),
+                if (tiny) footer,
+              ],
+            ),
+          ),
+        ),
+        if (!tiny) footer,
+      ],
+    );
+  }
+
+  Widget _header(bool dense) => Container(
+    padding: EdgeInsets.symmetric(horizontal: 20, vertical: dense ? 0 : 10),
     child: Row(
       children: [
-        const Text(
+        Text(
           "Edit Activity",
           style: TextStyle(
-            color: primaryColor,
+            color: AppTheme.textPrimaryOn(
+              Theme.of(context).brightness == Brightness.dark,
+            ),
             fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
         ),
         const Spacer(),
         IconButton(
+          visualDensity: dense ? VisualDensity.compact : null,
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
@@ -180,49 +201,22 @@ class _EditActivityDialogState extends State<EditActivityDialog> {
   Widget _activityField() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Text("Activity Type", style: TextStyle(color: Colors.grey)),
-      const SizedBox(height: 5),
-      TypeAheadField<ActivityTypeModel>(
-        controller: activitySearchController,
-
-        suggestionsCallback: (q) async =>
-            _service.fetchActivityTypes(search: q, limit: q.isEmpty ? 3 : 10),
-        itemBuilder: (_, s) => Container(
-          color: Colors.white,
-          child: ListTile(title: Text(s.name)),
-        ),
-        onSelected: (value) {
-          setState(() {
-            selectedActivity = value;
-            activitySearchController.text = value.name;
-          });
+      const FieldLabel("Activity Type", isRequired: true),
+      const SizedBox(height: 8),
+      MoboSingleSelectField<ActivityTypeModel>(
+        selected: selectedActivity,
+        selectedLabel: selectedActivity?.name,
+        hintText: 'Select activity type',
+        panelTitle: 'Select Activity Type',
+        search: (q) async {
+          final types = await _service.fetchActivityTypes(search: q, limit: 20);
+          return types
+              .map((t) => MoboSelectOption(value: t, label: t.name))
+              .toList();
         },
-        builder: (_, controller, node) => TextField(
-          controller: controller,
-          focusNode: node,
-          decoration: InputDecoration(
-            hintText: "Select Activity",
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(5),
-              borderSide: const BorderSide(color: Colors.grey, width: 0.5),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(5),
-              borderSide: const BorderSide(color: primaryColor, width: 1),
-            ),
-            suffixIcon: selectedActivity != null
-                ? IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () {
-                      setState(() {
-                        selectedActivity = null;
-                        activitySearchController.clear();
-                      });
-                    },
-                  )
-                : null,
-          ),
-        ),
+        onChanged: (value) {
+          setState(() => selectedActivity = value);
+        },
       ),
     ],
   );
@@ -230,113 +224,122 @@ class _EditActivityDialogState extends State<EditActivityDialog> {
   Widget _userField() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Text("Assigned To", style: TextStyle(color: Colors.grey)),
-      SizedBox(height: 5),
-      TypeAheadField<UserModel>(
-        controller: assigneesSearchController,
-        suggestionsCallback: (q) async =>
-            _service.fetchUsers(search: q, limit: q.isEmpty ? 5 : 10),
-        itemBuilder: (_, s) => Container(
-          color: Colors.white,
-          child: ListTile(title: Text(s.name)),
-        ),
-        onSelected: (value) {
-          setState(() {
-            selectedUser = value;
-            assigneesSearchController.text = value.name;
-          });
+      const FieldLabel("Assigned To", isRequired: true),
+      const SizedBox(height: 8),
+      MoboSingleSelectField<UserModel>(
+        selected: selectedUser,
+        selectedLabel: selectedUser?.name,
+        hintText: 'Select assignee',
+        panelTitle: 'Select Assignee',
+        search: (q) async {
+          final users = await _service.fetchUsers(search: q, limit: 20);
+          return users
+              .map((u) => MoboSelectOption(value: u, label: u.name))
+              .toList();
         },
-        builder: (_, controller, node) => TextField(
-          controller: controller,
-          focusNode: node,
-          decoration: InputDecoration(
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(5),
-              borderSide: const BorderSide(color: Colors.grey, width: 0.5),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(5),
-              borderSide: const BorderSide(color: primaryColor, width: 1),
-            ),
-            hintText: "Select Assignee",
-            suffixIcon: selectedUser != null
-                ? IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () {
-                      setState(() {
-                        selectedUser = null;
-                        assigneesSearchController.clear();
-                      });
-                    },
-                  )
-                : null,
-          ),
-        ),
+        onChanged: (value) {
+          setState(() => selectedUser = value);
+        },
       ),
     ],
   );
 
-  Widget _dateField(BuildContext context) => TextField(
-    controller: activityDateController,
-    readOnly: true,
+  /// The same filled, calendar-led date field as the app's other forms.
+  Widget _dateField(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hasDate = activityDateController.text.isNotEmpty;
 
-    onTap: () async {
-      final d = await showDatePicker(
-        context: context,
-        initialDate: activityDateController.text.isNotEmpty
-            ? DateTime.parse(activityDateController.text)
-            : DateTime.now(),
-        firstDate: DateTime(2000),
-        lastDate: DateTime(2100),
-        builder: (context, child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: ColorScheme.light(
-                primary: primaryColor,
-                onPrimary: Colors.white,
-                surface: Colors.white,
-                onSurface: Colors.black87,
-              ),
-              datePickerTheme: DatePickerThemeData(
-                headerBackgroundColor: primaryColor,
-                headerForegroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(28),
-                ),
+    return InkWell(
+      onTap: () => _pickDate(context),
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: Container(
+        width: double.infinity,
+        // 1px less than the 14×12 inset, to make room for the outline.
+        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 11),
+        decoration: BoxDecoration(
+          color: AppTheme.inputFill(isDark),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: AppTheme.restingBorderColor(isDark)),
+        ),
+        child: Row(
+          children: [
+            HugeIcon(
+              icon: HugeIcons.strokeRoundedCalendar03,
+              size: 20,
+              color: isDark ? Colors.white : Colors.grey[700],
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                hasDate ? activityDateController.text : 'Select date',
+                style: hasDate
+                    ? AppTheme.fieldValueStyle(isDark)
+                    : AppTheme.fieldHintStyle(isDark),
               ),
             ),
-            child: child!,
-          );
-        },
-      );
-      if (d != null) {
-        activityDateController.text =
-            "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
-      }
-    },
-    decoration: InputDecoration(
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(5),
-        borderSide: const BorderSide(color: Colors.grey, width: 0.5),
+          ],
+        ),
       ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(5),
-        borderSide: const BorderSide(color: primaryColor, width: 1),
-      ),
-      hintText: "Select date",
-      hintStyle: TextStyle(color: Colors.grey),
-    ),
-  );
+    );
+  }
+
+  Future<void> _pickDate(BuildContext context) async {
+    final d = await showDatePicker(
+      context: context,
+      initialDate: activityDateController.text.isNotEmpty
+          ? DateTime.parse(activityDateController.text)
+          : DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      builder: (context, child) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: isDark
+                ? ColorScheme.dark(
+                    primary: primaryColor,
+                    onPrimary: Colors.white,
+                    surface: AppTheme.darkSurface,
+                    onSurface: Colors.white,
+                  )
+                : ColorScheme.light(
+                    primary: primaryColor,
+                    onPrimary: Colors.white,
+                    surface: Colors.white,
+                    onSurface: Colors.black87,
+                  ),
+            datePickerTheme: DatePickerThemeData(
+              headerBackgroundColor: primaryColor,
+              headerForegroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(28),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (d != null) {
+      // The controller's listener rebuilds the field and the Update button.
+      activityDateController.text =
+          "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+    }
+  }
 
   Widget _submitButton(BuildContext context) => SizedBox(
     width: double.infinity,
     child: ElevatedButton(
       style: ElevatedButton.styleFrom(
-        backgroundColor: isFormValid ? primaryColor : Colors.grey.shade500,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        backgroundColor: primaryColor,
+        disabledBackgroundColor: AppTheme.disabledButtonFillOn(
+          Theme.of(context).brightness == Brightness.dark,
+        ),
+        disabledForegroundColor: AppTheme.disabledButtonText,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
         padding: const EdgeInsets.symmetric(vertical: 14),
       ),
-      onPressed: isFormValid
+      onPressed: canSubmit
           ? () async {
               try {
                 loadingDialog(
@@ -371,14 +374,14 @@ class _EditActivityDialogState extends State<EditActivityDialog> {
                   context,
                   "Activity updated successfully",
                 );
-              } catch (e) {
+              } catch (_) {
                 hideLoadingDialog(context);
                 Navigator.pop(context);
                 Navigator.pop(context);
                 CustomSnackbar.showError(context, "Update failed");
               }
             }
-          : () {},
+          : null,
       child: const Text("Update"),
     ),
   );

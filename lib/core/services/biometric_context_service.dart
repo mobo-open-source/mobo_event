@@ -1,5 +1,3 @@
-
-
 /// Service to manage biometric authentication context
 /// Prevents biometric prompts during account operations and provides grace periods
 class BiometricContextService {
@@ -22,7 +20,6 @@ class BiometricContextService {
       return true;
     }
 
-    /// Grace period after account operations
     if (_lastAccountOperationTime != null) {
       final timeSinceOperation = DateTime.now().difference(
         _lastAccountOperationTime!,
@@ -47,7 +44,6 @@ class BiometricContextService {
     _activeOperations.remove(operation);
     _isAccountOperation = _activeOperations.isNotEmpty;
     _lastAccountOperationTime = DateTime.now();
-
   }
 
   /// Reset the biometric context state

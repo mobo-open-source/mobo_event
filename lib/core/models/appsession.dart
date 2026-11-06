@@ -2,6 +2,7 @@ import 'package:odoo_rpc/odoo_rpc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/secure_storage_service.dart';
+import '../utils/odoo_version.dart';
 
 /// Extended session model with app-specific metadata
 class AppSessionData {
@@ -15,6 +16,14 @@ class AppSessionData {
   final bool isStockUser;
   final String? version;
 
+  /// True when signing this account in required a second factor.
+  ///
+  /// Odoo will not hand back a usable session for such an account from the
+  /// password alone, so a session carrying this flag must never be "refreshed"
+  /// by replaying the password — expiry has to route back through the TOTP
+  /// screen instead.
+  final bool usesTwoFactor;
+
   const AppSessionData({
     required this.odooSession,
     required this.password,
@@ -25,10 +34,24 @@ class AppSessionData {
     this.allowedCompanyIds = const [],
     this.isStockUser = false,
     this.version,
+    this.usesTwoFactor = false,
   });
 
   bool get isExpired =>
       expiresAt != null ? DateTime.now().isAfter(expiresAt!) : false;
+
+  /// The server's major Odoo version, or null when this session was restored
+  /// without one. Reads [version] first and falls back to the session's own
+  /// `serverVersion`, because the two are written by different login paths.
+  int? get odooMajorVersion =>
+      OdooVersion.majorOf(version) ??
+      OdooVersion.majorOf(odooSession.serverVersion);
+
+  /// True when this session's server is Odoo [major] or newer.
+  bool isOdooAtLeast(int major) {
+    final current = odooMajorVersion;
+    return current != null && current >= major;
+  }
 
   String get userLogin => odooSession.userLogin;
   int get userId => odooSession.userId;
@@ -45,6 +68,7 @@ class AppSessionData {
     List<int>? allowedCompanyIds,
     bool? isStockUser,
     String? version,
+    bool? usesTwoFactor,
   }) {
     return AppSessionData(
       odooSession: odooSession ?? this.odooSession,
@@ -56,6 +80,7 @@ class AppSessionData {
       allowedCompanyIds: allowedCompanyIds ?? this.allowedCompanyIds,
       isStockUser: isStockUser ?? this.isStockUser,
       version: version ?? this.version,
+      usesTwoFactor: usesTwoFactor ?? this.usesTwoFactor,
     );
   }
 
@@ -67,7 +92,14 @@ class AppSessionData {
     await prefs.setString('serverUrl', serverUrl);
     await prefs.setInt('userId', odooSession.userId);
     await prefs.setBool('isStockUser', isStockUser);
-    await prefs.setString('version', version.toString());
+    await prefs.setBool('usesTwoFactor', usesTwoFactor);
+    // Normalised, and never `version.toString()` on a null: that persisted
+    // the literal string "null", which then failed every version comparison
+    // in the app as if the server had no version at all.
+    await prefs.setString(
+      'version',
+      OdooVersion.normalize(version ?? odooSession.serverVersion),
+    );
 
     if (expiresAt != null) {
       await prefs.setString('expiresAt', expiresAt!.toIso8601String());
@@ -87,7 +119,6 @@ class AppSessionData {
     );
     await prefs.setBool('isLoggedIn', true);
 
-    /// Store password in secure storage
     await SecureStorageService.instance.storePassword(
       'session_password_username_${odooSession.userLogin}',
       password,
@@ -110,7 +141,10 @@ class AppSessionData {
       String? serverUrl = prefs.getString('serverUrl');
       final userId = prefs.getInt('userId');
       final isStockUser = prefs.getBool('isStockUser') ?? false;
-      final version = prefs.getString('version') ?? "";
+      final usesTwoFactor = prefs.getBool('usesTwoFactor') ?? false;
+      // Normalised on the way out too, so records written by an older build
+      // of this app ("19.0", "saas~18.4", or "null") still compare correctly.
+      final version = OdooVersion.normalize(prefs.getString('version'));
       if ([sessionId, userLogin, database, serverUrl, userId].contains(null)) {
         return null;
       }
@@ -121,7 +155,6 @@ class AppSessionData {
         serverUrl = 'https://$serverUrl';
       }
 
-      /// Load password from secure storage
       String? password = await SecureStorageService.instance.getPassword(
         'session_password_username_$userLogin',
       );
@@ -177,7 +210,10 @@ class AppSessionData {
         allowedCompanyIds: allowed,
         isStockUser: isStockUser,
         version: version,
+        usesTwoFactor: usesTwoFactor,
       );
-    } catch (e) {}
+    } catch (_) {
+      return null;
+    }
   }
 }

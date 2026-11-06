@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Used for Android API < 31 (see: https://developer.android.com/guide/topics/data/autobackup).
+  Excludes the Flutter SharedPreferences file so saved server URL / login history does not
+  survive an uninstall+reinstall via Android Auto Backup restore.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="FlutterSharedPreferences.xml" />
+</full-backup-content>
