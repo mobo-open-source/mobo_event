@@ -1,5 +1,6 @@
 
 import '../../../core/services/odoo_session_manager.dart';
+import '../../../core/utils/odoo_compat.dart';
 import '../model/answer.dart';
 import '../model/event_question.dart';
 
@@ -7,29 +8,15 @@ class QuestionService {
   /// Fetch questions with answers
   Future<List<EventQuestion>> fetchQuestionsWithAnswers(int eventId) async {
     try {
+      final compat = await OdooCompat.current();
 
-
-      final session = await OdooSessionManager.getCurrentSession();
-
-      final version = session!.odooSession.serverVersion;
-
-     String odooVersion = version;
-     /// Fetch questions
       final qRes = await OdooSessionManager.callKwWithCompany({
         "model": "event.question",
         "method": "search_read",
         "args": [],
         "kwargs": {
           "domain": [
-           if(odooVersion == '18'||odooVersion=='17') [
-              "event_id",
-              "in",
-              [eventId],
-            ]else [
-             "event_ids",
-             "in",
-             [eventId],
-           ]
+            [compat.questionEventField, "in", [eventId]],
           ],
 
           "order": "sequence asc",
@@ -79,7 +66,7 @@ class QuestionService {
         return q.copyWith(answers: qAnswers);
       }).toList();
 
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -100,7 +87,7 @@ class QuestionService {
         ],
         'kwargs': {},
       });
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -119,7 +106,7 @@ class QuestionService {
         ],
         'kwargs': {},
       });
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -144,7 +131,6 @@ class QuestionService {
         },
       });
 
-
       final response = qRes as List;
 
       final rQuestion = response
@@ -152,7 +138,7 @@ class QuestionService {
           .toList();
 
       return rQuestion;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -170,18 +156,14 @@ class QuestionService {
     int sequence = 10,
   }) async {
     try {
-      final session = await OdooSessionManager.getCurrentSession();
-
-      final version = session!.odooSession.serverVersion;
-
-      String odooVersion = version;
+      final compat = await OdooCompat.current();
       final payload = {
         'title': title,
         'is_mandatory_answer': isMandatory,
         'question_type': questionType,
         'once_per_order': oncePerOrder,
-      if(odooVersion =='19')  'is_default': isDefault,
-        if(odooVersion =='19')  'is_reusable': isReusable,
+        if (compat.hasReusableQuestions) 'is_default': isDefault,
+        if (compat.hasReusableQuestions) 'is_reusable': isReusable,
         'sequence': sequence,
 
         if (answers.isNotEmpty)
@@ -215,8 +197,12 @@ class QuestionService {
         ],
       });
 
-      } catch (e) {
-      }
+    } catch (_) {
+      // Not swallowed: a refusal (no create access on the question, no write
+      // access on the event) has to reach the dialog, which otherwise reports
+      // "Created and saved" over a question that was never linked.
+      rethrow;
+    }
   }
 
   /// Edit question
@@ -233,18 +219,14 @@ class QuestionService {
     int sequence = 10,
   }) async {
     try {
-      final session = await OdooSessionManager.getCurrentSession();
-
-      final version = session!.odooSession.serverVersion;
-
-      String odooVersion = version;
+      final compat = await OdooCompat.current();
       final payload = {
         'title': title,
         'is_mandatory_answer': isMandatory,
         'question_type': questionType,
         'once_per_order': oncePerOrder,
-      if(odooVersion =='19')  'is_default': isDefault,
-        if(odooVersion =='19') 'is_reusable': isReusable,
+        if (compat.hasReusableQuestions) 'is_default': isDefault,
+        if (compat.hasReusableQuestions) 'is_reusable': isReusable,
         'sequence': sequence,
 
         'answer_ids': [
@@ -263,8 +245,7 @@ class QuestionService {
         ],
       };
 
-
-      final result = await OdooSessionManager.callKwWithCompany({
+      await OdooSessionManager.callKwWithCompany({
         'model': 'event.question',
         'method': 'write',
         'args': [
@@ -273,7 +254,7 @@ class QuestionService {
         ],
       });
 
-       } catch (e) {
+       } catch (_) {
        rethrow;
     }
   }

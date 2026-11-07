@@ -20,7 +20,6 @@ class EventActivityProvider extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      ///fetch the activities FROMSERVER
       final res = await services.fetchActivities(activitiesId);
 
       if (res.isNotEmpty) {
@@ -32,7 +31,7 @@ class EventActivityProvider extends ChangeNotifier {
       activityList = [];
       isLoading = false;
       notifyListeners();
-    } catch (e) {
+    } catch (_) {
       isLoading = false;
       notifyListeners();
       rethrow;

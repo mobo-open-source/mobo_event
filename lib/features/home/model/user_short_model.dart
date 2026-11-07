@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-/// UserShortModel.dart
 class UserShortModel {
   final int? userId;
   final Uint8List? image;

@@ -75,7 +75,6 @@ class RegistrationFullModel {
     );
   }
 
-
   static List<RegistrationAnswer> _parseAnswers(dynamic value) {
     if (value == null || value == false) return [];
 

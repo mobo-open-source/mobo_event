@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
+import '../../../core/theme/app_theme.dart';
 
 class ActivityIcon extends StatelessWidget {
   final String? activityType;
@@ -21,10 +23,9 @@ class ActivityIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     IconData icon = Icons.access_time;
+    // Meetings use the app-wide HugeIcons calendar instead of a Material icon.
+    bool isMeeting = false;
 
-    /// Default icon
-
-    /// Make activity type comparison case-insensitive and more flexible
     final activityTypeLower = activityType?.toLowerCase() ?? '';
 
     if (activityTypeLower.contains('email') ||
@@ -35,7 +36,7 @@ class ActivityIcon extends StatelessWidget {
       icon = Icons.phone_outlined;
     } else if (activityTypeLower.contains('meeting') ||
         activityTypeLower.contains('appointment')) {
-      icon = Icons.event_outlined;
+      isMeeting = true;
     } else if (activityTypeLower.contains('to-do') ||
         activityTypeLower.contains('todo') ||
         activityTypeLower.contains('task')) {
@@ -55,7 +56,7 @@ class ActivityIcon extends StatelessWidget {
         activityTypeLower.contains('order')) {
       icon = Icons.bar_chart_outlined;
     } else {
-      /// Fallback to exact string matching for backward compatibility
+      // Fallback to exact string matching for backward compatibility
       switch (activityType) {
         case 'Email':
           icon = Icons.email_outlined;
@@ -64,7 +65,7 @@ class ActivityIcon extends StatelessWidget {
           icon = Icons.phone_outlined;
           break;
         case 'Meeting':
-          icon = Icons.event_outlined;
+          isMeeting = true;
           break;
         case 'To-Do':
           icon = Icons.check_outlined;
@@ -96,26 +97,30 @@ class ActivityIcon extends StatelessWidget {
     Color color = Colors.grey;
     String stateText = '';
     if (activityState == 'planned' || activityState == 'tomorrow') {
-      color = Colors.green;
+      color = StatusColors.green;
       stateText = 'Planned';
     } else if (activityState == 'overdue') {
-      color = Colors.red;
+      color = StatusColors.red;
       stateText = 'Overdue';
     } else if (activityState == 'today') {
-      color = Colors.orange;
+      color = StatusColors.orange;
       stateText = 'Today';
     }
+
+    Widget glyph(Color iconColor) => isMeeting
+        ? HugeIcon(
+            icon: HugeIcons.strokeRoundedCalendar03,
+            color: iconColor,
+            size: size,
+          )
+        : Icon(icon, color: iconColor, size: size);
 
     if (!isLabel) {
       return activityType != null
           ? CircleAvatar(
               radius: radius,
-              backgroundColor: filled ? color : color.withOpacity(0.2),
-              child: Icon(
-                icon,
-                color: filled ? Colors.white : color,
-                size: size,
-              ),
+              backgroundColor: filled ? color : color.withValues(alpha: 0.2),
+              child: glyph(filled ? Colors.white : color),
             )
           : const Icon(Icons.access_time, color: Colors.grey, size: 20);
     }
@@ -123,13 +128,13 @@ class ActivityIcon extends StatelessWidget {
     return Container(
       padding: EdgeInsets.all(5),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: size, color: color),
+          glyph(color),
           const SizedBox(width: 6),
           Text(
             stateText,

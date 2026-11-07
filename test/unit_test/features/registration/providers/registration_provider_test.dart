@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobo_event/features/registration/model/attendee_group.dart';
 import 'package:mobo_event/features/registration/model/attendee_model.dart';
 import 'package:mobo_event/features/registration/model/attendee_short_model.dart';
 import 'package:mobo_event/features/registration/model/demo_question_answer.dart';
@@ -10,6 +11,7 @@ import '../service/mock_registration_services.dart';
 
 
 void main(){
+  groupByTests();
   late MockRegistrationServices services;
   late RegistrationProvider provider;
 
@@ -222,4 +224,121 @@ void main(){
     expect(provider.editLoading, false);
   });
 
+}
+// Group By: the lists hold every attendee instead of a page of them.
+void groupByTests() {
+  late MockRegistrationServices services;
+  late RegistrationProvider provider;
+
+  AttendeeShortModel attendee(int id, String state) =>
+      AttendeeShortModel(id: id, name: 'a$id', state: state, barcode: 'b$id');
+
+  setUp(() {
+    services = MockRegistrationServices();
+    provider = RegistrationProvider(services: services);
+  });
+
+  group('group by', () {
+    test('starts ungrouped, and the two lists group independently', () {
+      expect(provider.groupByTotal, isNull);
+      expect(provider.groupByEvent, isNull);
+      provider.setGroupByTotal(AttendeeGroupBy.status);
+      expect(provider.isGroupedTotal, true);
+      expect(provider.isGroupedEvent, false);
+      provider.setGroupByEvent(AttendeeGroupBy.ticket);
+      provider.clearGroupBy();
+      expect(provider.isGroupedTotal, false);
+      expect(provider.isGroupedEvent, false);
+    });
+
+    test('a grouped list loads every attendee, not a page', () async {
+      provider.setGroupByTotal(AttendeeGroupBy.status);
+      final all = [attendee(1, 'open'), attendee(2, 'done'), attendee(3, 'open')];
+      when(
+        () => services.getAllAttendees(
+          search: any(named: 'search'),
+          filter: any(named: 'filter'),
+        ),
+      ).thenAnswer((_) async => all);
+
+      await provider.loadAttendees(reset: true);
+
+      expect(provider.fetchedAttendees, all);
+      expect(provider.totalRecords, 3);
+      expect(provider.isLoading, false);
+      expect(provider.groupedAttendeesTotal.map((g) => g.label), [
+        'Registered',
+        'Attended',
+      ]);
+      // No count query, no paging.
+      verifyNever(
+        () => services.getAttendeesByPagination(
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+          search: any(named: 'search'),
+          filter: any(named: 'filter'),
+        ),
+      );
+      expect(provider.canGoNext, false);
+      expect(provider.canGoPrevious, false);
+      expect(provider.paginationText, '1–3 / 3');
+    });
+
+    test('a grouped per-event list asks for that event\'s attendees', () async {
+      provider.setGroupByEvent(AttendeeGroupBy.status);
+      when(
+        () => services.getAllAttendees(
+          eventId: 7,
+          search: any(named: 'search'),
+          filter: any(named: 'filter'),
+        ),
+      ).thenAnswer((_) async => [attendee(1, 'draft')]);
+
+      await provider.loadAttendeesByEvent(eventId: 7, reset: true);
+
+      expect(provider.totalRecordsEvent, 1);
+      expect(provider.groupedAttendeesEvent.single.label, 'Unconfirmed');
+      expect(provider.canGoNextEvent, false);
+      expect(provider.paginationTextEvent, '1–1 / 1');
+    });
+
+    test('leaving the grouping goes back to pages', () async {
+      provider.setGroupByTotal(AttendeeGroupBy.status);
+      provider.setGroupByTotal(null);
+      final page = [attendee(1, 'open')];
+      when(
+        () => services.getAttendeesByPagination(
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+          search: any(named: 'search'),
+          filter: any(named: 'filter'),
+        ),
+      ).thenAnswer((_) async => page);
+      when(
+        () => services.gettingAttendeesCount(
+          search: any(named: 'search'),
+          filter: any(named: 'filter'),
+        ),
+      ).thenAnswer((_) async => 90);
+
+      await provider.loadAttendees(reset: true);
+
+      expect(provider.totalRecords, 90);
+      expect(provider.canGoNext, true);
+      expect(provider.groupedAttendeesTotal, isEmpty);
+    });
+
+    test('a failed grouped load leaves the error state', () async {
+      provider.setGroupByTotal(AttendeeGroupBy.status);
+      when(
+        () => services.getAllAttendees(
+          search: any(named: 'search'),
+          filter: any(named: 'filter'),
+        ),
+      ).thenThrow(Exception('boom'));
+      await expectLater(provider.loadAttendees(reset: true), throwsException);
+      expect(provider.isLoading, false);
+      expect(provider.fetchedAttendees, isNull);
+    });
+  });
 }

@@ -43,3 +43,15 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local AI-assistant instructions (kept on disk, not published)
+CLAUDE.md
+
+# Local VS Code workspace files
+*.code-workspace
+
+# Signing keys and credentials (never commit)
+key.properties
+*.keystore
+*.jks
+*.pem

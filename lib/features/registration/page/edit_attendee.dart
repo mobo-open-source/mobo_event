@@ -18,6 +18,27 @@ class EditAttendee extends StatefulWidget {
 }
 
 class _EditAttendeeState extends State<EditAttendee> {
+  final _formKey = GlobalKey<CreateFormAttendeesState>();
+
+  /// Leaves straight away when nothing was edited; otherwise asks first.
+  Future<void> _onBack() async {
+    final provider = Provider.of<RegistrationProvider>(context, listen: false);
+    if (_formKey.currentState?.hasChanges ?? false) {
+      final leave = await showBackDialog(
+        context,
+        title: 'Discard changes',
+        subtitle:
+            "You have unsaved Attendee data that will be lost if you leave this page. Are you sure you want to discard these changes?",
+        leftButtonName: "Stay",
+        rightButtonName: "Leave",
+        function: () => Navigator.pop(context, true),
+      );
+      if (!leave || !mounted) return;
+    }
+    provider.resetRegistration();
+    Navigator.pop(context);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -34,7 +55,7 @@ class _EditAttendeeState extends State<EditAttendee> {
       );
 
       await provider.getSelectedAttendeeInformation(id);
-    } catch (e) {
+    } catch (_) {
       CustomSnackbar.showError(context, "error fetching attendee details");
     }
   }
@@ -44,48 +65,15 @@ class _EditAttendeeState extends State<EditAttendee> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (didPop, result) async {
+      onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        bool confirm = await showBackDialog(
-          context,
-          title: 'Go to Attendees list page',
-          subtitle: "Are you sure go to the Attendees list page?",
-          leftButtonName: "Stay",
-          rightButtonName: "Leave",
-          function: () {
-            final provider = Provider.of<RegistrationProvider>(
-              context,
-              listen: false,
-            );
-            provider.resetRegistration();
-            Navigator.pop(context);
-            Navigator.pop(context);
-          },
-        );
+        _onBack();
       },
 
       child: Scaffold(
         appBar: AppBar(
-          backgroundColor: isDark ? Colors.grey[900] : backgroundColor,
           leading: GestureDetector(
-            onTap: () async {
-              bool confirm = await showBackDialog(
-                context,
-                title: 'Go to Attendees list page',
-                subtitle: "Are you sure go to the Attendees list page?",
-                leftButtonName: "Stay",
-                rightButtonName: "Leave",
-                function: () {
-                  final provider = Provider.of<RegistrationProvider>(
-                    context,
-                    listen: false,
-                  );
-                  provider.resetRegistration();
-                  Navigator.pop(context);
-                  Navigator.pop(context);
-                },
-              );
-            },
+            onTap: _onBack,
             child: Padding(
               padding: const EdgeInsets.all(15),
               child: HugeIcon(
@@ -102,36 +90,44 @@ class _EditAttendeeState extends State<EditAttendee> {
             ),
           ),
         ),
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        backgroundColor: isDark ? Colors.grey[900] : backgroundColor,
 
-          children: [
-            Expanded(
-              child: Consumer<RegistrationProvider>(
-                builder: (context, provider, child) {
-                  if (provider.editLoading) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: ListView(
-                        children: const [
-                          FullCardShimmer(height: 150),
-                          FullCardShimmer(height: 150),
-                          FullCardShimmer(height: 150),
-                          FullCardShimmer(height: 150),
-                          FullCardShimmer(height: 150),
-                          FullCardShimmer(height: 150),
-                        ],
-                      ),
-                    );
-                  } else if (provider.selectedAttendee == null) {
-                    return Text("data not found");
-                  } else {
-                    return CreateFormAttendees(edit: true);
-                  }
-                },
+        // Left/right only: the form's own footer handles the bottom inset. Zero
+        // in portrait; in landscape it keeps the form clear of a notch or the
+        // navigation bar.
+        body: SafeArea(
+          top: false,
+          bottom: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Consumer<RegistrationProvider>(
+                  builder: (context, provider, child) {
+                    if (provider.editLoading) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: ListView(
+                          children: const [
+                            FullCardShimmer(height: 150),
+                            FullCardShimmer(height: 150),
+                            FullCardShimmer(height: 150),
+                            FullCardShimmer(height: 150),
+                            FullCardShimmer(height: 150),
+                            FullCardShimmer(height: 150),
+                          ],
+                        ),
+                      );
+                    } else if (provider.selectedAttendee == null) {
+                      return Text("data not found");
+                    } else {
+                      return CreateFormAttendees(key: _formKey, edit: true);
+                    }
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

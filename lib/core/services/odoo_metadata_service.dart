@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 import 'odoo_session_manager.dart';
 
 /// Lightweight metadata helper to probe Odoo capabilities and cache results.
@@ -25,7 +23,7 @@ class OdooMetadataService {
       _modelCache[model] = ok;
 
       return ok;
-    } catch (e) {
+    } catch (_) {
       try {
         final res = await OdooSessionManager.callKwWithCompany({
           'model': model,
@@ -39,8 +37,7 @@ class OdooMetadataService {
         _modelCache[model] = ok;
 
         return ok;
-      } catch (e2) {
-
+      } catch (_) {
         _modelCache[model] = false;
         return false;
       }

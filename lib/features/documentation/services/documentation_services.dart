@@ -1,9 +1,6 @@
-
 import '../../../core/services/odoo_session_manager.dart';
 
 class DocumentationServices {
-
-
   /// Build payload for updating document information
   static Map<String, dynamic> buildUpdatePayload({
     String? badge,
@@ -27,7 +24,6 @@ class DocumentationServices {
           ? false
           : ticketInstruction.trim();
     }
-    /// Check if image has changed
     if (imageChanged) {
       vals['badge_image'] =
           (backgroundBase64 == null || backgroundBase64.isEmpty)
@@ -38,13 +34,11 @@ class DocumentationServices {
     return vals;
   }
 
-
   /// Update document information
   static Future<bool> update(int eventId, Map<String, dynamic> vals) async {
     try {
       if (vals.isEmpty) return true;
 
-      /// Update document information via Odoo RPC
       await OdooSessionManager.callKwWithCompany({
         'model': 'event.event',
         'method': 'write',
@@ -56,7 +50,7 @@ class DocumentationServices {
       });
 
       return true;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }

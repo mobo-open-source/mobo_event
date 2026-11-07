@@ -8,8 +8,10 @@ import 'package:mobo_event/shared/widgets/shimmer_card/shimmer_card.dart';
 import 'package:mobo_event/shared/widgets/snackbars/custom_snackbar.dart';
 import 'package:provider/provider.dart';
 import '../../../core/const/app_colors.dart';
+import '../../../core/services/event_access_rights.dart';
 import '../../../shared/helper/helper_method.dart';
-import '../../../shared/widgets/action_button.dart';
+import '../../../shared/widgets/dialogs/common_dialog.dart';
+import '../../../shared/widgets/section_list_state.dart';
 import '../../../shared/widgets/loading/loading_widget.dart';
 
 class TicketLineWidget extends StatelessWidget {
@@ -21,111 +23,104 @@ class TicketLineWidget extends StatelessWidget {
     this.dummyTicket = false,
   });
 
+  void _addTicket(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) =>
+          CreateTicketDialog(eventId: eventId, creation: dummyTicket),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            "Ticket Information",
-            style: TextStyle(
-              fontSize: 18,
-              color: Colors.black,
-              fontWeight: FontWeight.bold,
-            ),
+    return Consumer<EventDetailedProvider>(
+      builder: (context, provider, child) {
+        final hasTickets = dummyTicket
+            ? provider.dummyTicketList.isNotEmpty
+            : !provider.isTicketLoading && provider.ticketList.isNotEmpty;
+        // Adding a ticket — staged with a new event or saved straight onto an
+        // existing one — is a create on `event.event.ticket`.
+        final canAdd = context.watch<AccessRights>().canAddTicket;
+        // Nothing to list (and not still loading): the empty state takes the
+        // whole area and centres itself, instead of sitting at the top of a
+        // scroll view.
+        final isEmpty = dummyTicket
+            ? provider.dummyTicketList.isEmpty
+            : !provider.isTicketLoading && provider.ticketList.isEmpty;
+        // The create form leaves the panel unsized while nothing is staged, so
+        // the empty state sets its height: there is no bounded area to fill
+        // (an Expanded would throw) or to centre it in.
+        final hugsEmptyState = dummyTicket && isEmpty;
+        return SizedBox(
+          width: double.infinity,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SectionHeader(
+                title: "Ticket Information",
+                onAdd: hasTickets && canAdd ? () => _addTicket(context) : null,
+              ),
+              const SizedBox(height: 16),
+              if (hugsEmptyState)
+                _emptyState(context, centered: false)
+              else
+                Expanded(
+                  child: isEmpty
+                      ? _emptyState(context)
+                      : SingleChildScrollView(
+                          child: dummyTicket
+                              ? _buildDummyTicketContent(provider, context)
+                              : _buildContent(provider, context),
+                        ),
+                ),
+            ],
           ),
-
-          const SizedBox(height: 20),
-
-          Expanded(
-            child: Consumer<EventDetailedProvider>(
-              builder: (context, provider, child) {
-                return SingleChildScrollView(
-                  child: dummyTicket
-                      ? _buildDummyTicketContent(provider, context)
-                      : _buildContent(provider, context),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
+  }
+
+  Widget _emptyState(BuildContext context, {bool centered = true}) {
+    final empty = EmptySectionState(
+      icon: HugeIcons.strokeRoundedTicket01,
+      title: "No tickets yet",
+      actionLabel: "Add Ticket",
+      compactAction: true,
+      onAction: context.watch<AccessRights>().canAddTicket
+          ? () => _addTicket(context)
+          : null,
+    );
+    return centered ? CenteredSectionBody(child: empty) : empty;
   }
 
   Widget _buildDummyTicketContent(
     EventDetailedProvider provider,
     BuildContext context,
   ) {
-    if (provider.dummyTicketList.isNotEmpty) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListView.builder(
-            physics: NeverScrollableScrollPhysics(),
-            shrinkWrap: true,
-            itemCount: provider.dummyTicketList.length,
-            itemBuilder: (context, index) => TicketCard(
-              ticket: provider.dummyTicketList[index],
-              eventId: eventId,
-              dummy: true,
+    return ListView.builder(
+      padding: EdgeInsets.zero,
+      physics: NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      itemCount: provider.dummyTicketList.length,
+      itemBuilder: (context, index) => TicketCard(
+        ticket: provider.dummyTicketList[index],
+        eventId: eventId,
+        dummy: true,
 
-              onDelete: () async {
-                provider.removeDummyTicket(index);
-              },
-            ),
-          ),
-          _actionButton(
-            label: "Add Ticket",
-            icon: HugeIcons.strokeRoundedAdd01,
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) =>
-                    CreateTicketDialog(eventId: eventId, creation: dummyTicket),
-              );
-            },
-          ),
-        ],
-      );
-    }
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.center,
-
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 40),
-            const HugeIcon(
-              icon: HugeIcons.strokeRoundedTicket01,
-              size: 60,
-              color: Colors.grey,
-            ),
-            const SizedBox(height: 16),
-            _actionButton(
-              label: "Create Ticket",
-              icon: HugeIcons.strokeRoundedAdd01,
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => CreateTicketDialog(
-                    eventId: eventId,
-                    creation: dummyTicket,
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ],
+        onDelete: () async {
+          final ticket = provider.dummyTicketList[index];
+          final confirm = await CommonDialog.confirm(
+            context,
+            title: 'Delete Ticket',
+            message:
+                'Are you sure you want to delete "${ticket.name ?? 'this ticket'}"?',
+            confirmText: 'Delete',
+          );
+          if (confirm != true) return;
+          provider.removeDummyTicket(index);
+        },
+      ),
     );
   }
 
@@ -144,19 +139,30 @@ class TicketLineWidget extends StatelessWidget {
       );
     }
 
-    if (provider.ticketList.isNotEmpty) {
-      return Column(
-        children: [
-          ListView.builder(
-            padding: EdgeInsets.zero,
-            physics: NeverScrollableScrollPhysics(),
-            shrinkWrap: true,
-            itemCount: provider.ticketList.length,
-            itemBuilder: (context, index) => TicketCard(
-              ticket: provider.ticketList[index],
-              eventId: eventId,
+    return ListView.builder(
+      padding: EdgeInsets.zero,
+      physics: NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      itemCount: provider.ticketList.length,
+      itemBuilder: (context, index) => TicketCard(
+        ticket: provider.ticketList[index],
+        eventId: eventId,
 
-              onDelete: () async {
+        // Deleting a saved ticket is an unlink on `event.event.ticket`; without
+        // that right the card has no menu at all.
+        onDelete: !context.watch<AccessRights>().canDeleteTicket
+            ? null
+            : () async {
+                final ticket = provider.ticketList[index];
+                final confirm = await CommonDialog.confirm(
+                  context,
+                  title: 'Delete Ticket',
+                  message:
+                      'Are you sure you want to delete "${ticket.name ?? 'this ticket'}"?',
+                  confirmText: 'Delete',
+                );
+                if (confirm != true || !context.mounted) return;
+
                 try {
                   loadingDialog(
                     context,
@@ -190,73 +196,6 @@ class TicketLineWidget extends StatelessWidget {
                   CustomSnackbar.showError(context, "Server Error :$error");
                 }
               },
-            ),
-          ),
-          SizedBox(height: 10),
-
-          actionButton(
-            label: "Add Ticket",
-            icon: HugeIcons.strokeRoundedAdd01,
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => CreateTicketDialog(eventId: eventId),
-              );
-            },
-          ),
-        ],
-      );
-    }
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-
-          children: [
-            const SizedBox(height: 100),
-            const HugeIcon(
-              icon: HugeIcons.strokeRoundedTicket01,
-              size: 60,
-              color: Colors.grey,
-            ),
-            const SizedBox(height: 16),
-
-            const Text("Add new ticket", style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 16),
-            _actionButton(
-              label: "Create Ticket",
-              icon: HugeIcons.strokeRoundedAdd01,
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => CreateTicketDialog(eventId: eventId),
-                );
-              },
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _actionButton({
-    required String label,
-    required List<List<dynamic>> icon,
-    required VoidCallback onPressed,
-  }) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: HugeIcon(icon: icon, size: 16),
-      label: Text(label),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-        elevation: 0,
-        textStyle: const TextStyle(fontSize: 12),
       ),
     );
   }

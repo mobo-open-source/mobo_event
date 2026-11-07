@@ -7,16 +7,15 @@ import 'package:hugeicons/hugeicons.dart';
 
 import '../../../shared/widgets/loaders/loading_widget.dart';
 import '../../../core/services/reset_password_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/screen_layout.dart';
+import 'login_layout.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   final String? url;
   final String? database;
 
-  const ResetPasswordScreen({
-    super.key,
-    this.url,
-    this.database,
-  });
+  const ResetPasswordScreen({super.key, this.url, this.database});
 
   @override
   State<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
@@ -45,21 +44,20 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
       vsync: this,
     );
 
-    _successFadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _successAnimationController,
-      curve: Curves.easeInOut,
-    ));
+    _successFadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _successAnimationController,
+        curve: Curves.easeInOut,
+      ),
+    );
 
-    _successSlideAnimation = Tween<Offset>(
-      begin: const Offset(0.0, 0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _successAnimationController,
-      curve: Curves.easeOutBack,
-    ));
+    _successSlideAnimation =
+        Tween<Offset>(begin: const Offset(0.0, 0.3), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: _successAnimationController,
+            curve: Curves.easeOutBack,
+          ),
+        );
   }
 
   @override
@@ -79,12 +77,13 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
 
     final formValid = _formKey.currentState?.validate() ?? false;
     setState(() {
-      _emailHasError = _emailController.text.trim().isEmpty ||
+      _emailHasError =
+          _emailController.text.trim().isEmpty ||
           !ResetPasswordService.isValidEmail(_emailController.text.trim());
     });
 
     if (!formValid) {
-       await HapticFeedback.lightImpact();
+      await HapticFeedback.lightImpact();
       return;
     }
 
@@ -99,28 +98,23 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
         login: _emailController.text.trim(),
       );
 
-
       if (!mounted) return;
 
       if (result['success'] == true) {
-         setState(() {
+        setState(() {
           _successMessage = result['message'];
           _errorMessage = null;
         });
         _successAnimationController.forward();
         await HapticFeedback.selectionClick();
-      } else if (result['requiresWebView'] == true) {
-         /// Navigate to WebView for reCAPTCHA-enabled servers
-        await HapticFeedback.lightImpact();
-
       } else {
-         setState(() {
+        setState(() {
           _errorMessage = result['message'];
           _successMessage = null;
         });
         await HapticFeedback.heavyImpact();
       }
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _errorMessage = 'An unexpected error occurred. Please try again.';
@@ -135,29 +129,58 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
       }
     }
   }
+
+  /// Everything under the header: the animated confirmation, then either the
+  /// form or the way back to sign-in.
+  List<Widget> _buildBodyChildren() {
+    return [
+      if (_successMessage != null)
+        AnimatedBuilder(
+          animation: _successAnimationController,
+          builder: (context, child) {
+            return SlideTransition(
+              position: _successSlideAnimation,
+              child: FadeTransition(
+                opacity: _successFadeAnimation,
+                child: _buildSuccessMessage(),
+              ),
+            );
+          },
+        ),
+
+      if (_successMessage == null) ...[
+        _buildForm(),
+      ] else ...[
+        const SizedBox(height: 32),
+        _buildBackToLoginButton(),
+      ],
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final screenHeight = MediaQuery.of(context).size.height;
+
+    // On a phone on its side the header and the form no longer fit on screen
+    // together, so they scroll as one compact page.
+    final compact = context.isLandscape && context.isShortScreen;
 
     return WillPopScope(
       onWillPop: () async => !_isLoading,
       child: Scaffold(
         body: Stack(
           children: [
-            /// Background
             Positioned.fill(
               child: Container(
                 decoration: BoxDecoration(
-                  color: isDark ? Colors.grey[950] : Colors.grey[50],
+                  color: isDark ? Colors.grey[900] : Colors.grey[50],
                   image: DecorationImage(
-                    ///set your login image
                     image: AssetImage('assets/images/loginbg.png'),
                     fit: BoxFit.cover,
                     colorFilter: ColorFilter.mode(
                       isDark
-                          ? Colors.black.withOpacity(1)
-                          : Colors.white.withOpacity(1),
+                          ? Colors.black.withValues(alpha: 1)
+                          : Colors.white.withValues(alpha: 1),
                       BlendMode.dstATop,
                     ),
                   ),
@@ -165,81 +188,52 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
               ),
             ),
 
-            /// Main content (perfectly centered like login page)
-            LayoutBuilder(
-              builder: (context, constraints) {
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      /// Ensure the content takes at least full viewport height for vertical centering
-                      minHeight: constraints.maxHeight,
-                    ),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 400),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            /// Header
-                            _buildHeader(),
-                            const SizedBox(height: 48),
-
-                            /// Success message (animated)
-                            if (_successMessage != null)
-                              AnimatedBuilder(
-                                animation: _successAnimationController,
-                                builder: (context, child) {
-                                  return SlideTransition(
-                                    position: _successSlideAnimation,
-                                    child: FadeTransition(
-                                      opacity: _successFadeAnimation,
-                                      child: _buildSuccessMessage(),
-                                    ),
-                                  );
-                                },
-                              ),
-
-                            /// Form or success state
-                            if (_successMessage == null) ...[
-                              _buildForm(),
-                            ] else ...[
-                              const SizedBox(height: 32),
-                              _buildBackToLoginButton(),
+            if (compact)
+              Positioned.fill(
+                child: LoginCompactBody(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      _buildHeader(compact: true),
+                      const SizedBox(height: 20),
+                      ..._buildBodyChildren(),
+                    ],
+                  ),
+                ),
+              )
+            else
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        // Ensure the content takes at least full viewport height for vertical centering
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 400),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              _buildHeader(),
+                              const SizedBox(height: 48),
+                              ..._buildBodyChildren(),
                             ],
-                          ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              },
-            ),
-
-            /// Back button
-            Positioned(
-              top: 24,
-              left: 0,
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap:
-                      _isLoading ? null : () => Navigator.of(context).pop(),
-                  borderRadius: BorderRadius.circular(32),
-                  child: Container(
-                    height: 64,
-                    width: 64,
-                    alignment: Alignment.center,
-                    child: HugeIcon(
-                      icon:HugeIcons.strokeRoundedArrowLeft01,
-                      color: _isLoading ? Colors.white54 : Colors.white,
-                      size: 24,
-                    ),
-                  ),
-                ),
+                  );
+                },
               ),
+
+            LoginBackButton(
+              onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
             ),
           ],
         ),
@@ -247,25 +241,25 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader({bool compact = false}) {
     return Column(
       children: [
         HugeIcon(
-         icon: HugeIcons.strokeRoundedLockPassword,
+          icon: HugeIcons.strokeRoundedLockPassword,
           color: Colors.white,
-          size: 48,
+          size: compact ? 36 : 48,
         ),
-        const SizedBox(height: 24),
+        SizedBox(height: compact ? 12 : 24),
         Text(
           'Reset Password',
-          style: GoogleFonts.montserrat(
-            fontSize: 28,
+          style: GoogleFonts.manrope(
+            fontSize: compact ? 24 : 28,
             fontWeight: FontWeight.w600,
             color: Colors.white,
           ),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: compact ? 8 : 16),
         Text(
           'Enter your email address and we\'ll send you a link to reset your password',
           style: GoogleFonts.manrope(
@@ -277,7 +271,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
           textAlign: TextAlign.center,
         ),
         if (widget.url != null) ...[
-          const SizedBox(height: 16),
+          SizedBox(height: compact ? 8 : 16),
           Text(
             'Server: ${widget.url}',
             style: GoogleFonts.manrope(
@@ -298,7 +292,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          /// Email field
           TextFormField(
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
@@ -316,7 +309,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
             },
             onChanged: (value) {
               setState(() {
-                _emailHasError = value.trim().isEmpty ||
+                _emailHasError =
+                    value.trim().isEmpty ||
                     !ResetPasswordService.isValidEmail(value.trim());
                 if (_errorMessage != null) {
                   _errorMessage = null;
@@ -334,11 +328,11 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
               hintStyle: GoogleFonts.manrope(
                 fontSize: 14,
                 fontWeight: FontWeight.w400,
-                color: Colors.black.withOpacity(.4),
+                color: Colors.black.withValues(alpha: .4),
               ),
               prefixIcon: Padding(
                 padding: const EdgeInsets.all(15),
-                child: HugeIcon(icon:HugeIcons.strokeRoundedMail01),
+                child: HugeIcon(icon: HugeIcons.strokeRoundedMail01),
               ),
               prefixIconColor: WidgetStateColor.resolveWith(
                 (states) => states.contains(WidgetState.disabled)
@@ -348,7 +342,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
               suffixIcon: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: _emailHasError
-                    ? HugeIcon(icon:HugeIcons.strokeRoundedMail01, color: Colors.red, )
+                    ? HugeIcon(
+                        icon: HugeIcons.strokeRoundedMail01,
+                        color: StatusColors.red,
+                      )
                     : null,
               ),
               border: OutlineInputBorder(
@@ -357,12 +354,14 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
               ),
               filled: true,
               fillColor: Colors.white,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 16,
+              ),
               errorStyle: const TextStyle(color: Colors.white),
               errorBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.red[900]!, width: 1.0),
+                borderSide: BorderSide(color: StatusColors.red, width: 1.0),
               ),
               focusedErrorBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -372,7 +371,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
           ),
           const SizedBox(height: 24),
 
-          /// Error message
           AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             height: _errorMessage != null ? 48 : 0,
@@ -382,8 +380,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Icon(Icons.error,
-                            color: Colors.white, size: 18),
+                        Icon(Icons.error, color: Colors.white, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -403,7 +400,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
 
           const SizedBox(height: 24),
 
-          /// Send reset email button
           SizedBox(
             height: 48,
             child: ElevatedButton(
@@ -411,7 +407,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
-                disabledBackgroundColor: Colors.black.withOpacity(.75),
+                disabledBackgroundColor: Colors.black.withValues(alpha: .75),
                 disabledForegroundColor: Colors.white,
                 overlayColor: Colors.transparent,
                 surfaceTintColor: Colors.transparent,
@@ -434,7 +430,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
                         const SizedBox(width: 12),
                         const LoadingWidget(
                           color: Colors.white,
-                          size: 28,
+                          size: 20,
                           variant: LoadingVariant.staggeredDots,
                         ),
                       ],
@@ -457,21 +453,17 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
     return Container(
       padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
+        color: Colors.white.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.3)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
       ),
       child: Column(
         children: [
-          Icon(
-            Icons.check_circle,
-            color: Colors.green,
-            size: 48,
-          ),
+          Icon(Icons.check_circle, color: StatusColors.green, size: 48),
           const SizedBox(height: 16),
           Text(
             'Email Sent!',
-            style: GoogleFonts.montserrat(
+            style: GoogleFonts.manrope(
               fontSize: 18,
               fontWeight: FontWeight.w600,
               color: Colors.white,
@@ -501,7 +493,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.black,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: Colors.black.withOpacity(.75),
+          disabledBackgroundColor: Colors.black.withValues(alpha: .75),
           disabledForegroundColor: Colors.white,
           overlayColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
@@ -512,10 +504,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
         ),
         child: Text(
           'Back to Login',
-          style: GoogleFonts.manrope(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
     );

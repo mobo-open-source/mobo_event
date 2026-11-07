@@ -1,18 +1,28 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:hugeicons/hugeicons.dart';
+
 import 'package:image_picker/image_picker.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:mobo_event/features/profile/pages/profile_detail_screen.dart';
+import 'package:mobo_event/features/profile/widgets/profile_header_card.dart';
+import 'package:mobo_event/features/profile/widgets/switch_account_widget.dart';
+import 'package:mobo_event/features/settings/pages/settings_screen.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:provider/provider.dart';
-import '../../../shared/widgets/snackbars/custom_snackbar.dart';
+
 import '../../../core/providers/logout_view_model.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/screen_layout.dart';
+import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import '../providers/profile_provider.dart';
-import '../../settings/pages/settings_screen.dart';
+
 import '../../../shared/widgets/action_tile.dart';
 import '../../../shared/widgets/connection_status_widget.dart';
-import '../widgets/profile_header_card.dart';
-import '../widgets/switch_account_widget.dart';
+
+/// A screen that provides a high-level overview of the user's profile and app configuration.
+///
+/// This screen serves as a central hub for accessing settings, switching accounts,
+/// managing profile photos, and initiating logout.
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -74,6 +84,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+      // Two short rows don't need an 800dp-wide sheet in landscape.
+      constraints: context.isLandscape
+          ? const BoxConstraints(maxWidth: 560)
+          : null,
       builder: (context) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -97,7 +111,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Row(
                 children: [
                   HugeIcon(
-                   icon:  HugeIcons.strokeRoundedCamera02,
+                    icon: HugeIcons.strokeRoundedCamera02,
                     size: 24,
                     color: isDark ? Colors.white : Colors.black87,
                   ),
@@ -122,7 +136,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Row(
                 children: [
                   HugeIcon(
-                  icon:   HugeIcons.strokeRoundedImageCrop,
+                    icon: HugeIcons.strokeRoundedImageCrop,
                     size: 24,
                     color: isDark ? Colors.white : Colors.black87,
                   ),
@@ -145,7 +159,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     double rs(double size) {
-      final w = MediaQuery.of(context).size.width;
+      // Shortest side, not width, so a phone turned sideways keeps its
+      // portrait text size instead of scaling up inside a shorter window.
+      final w = MediaQuery.sizeOf(context).shortestSide;
       final scale = (w / 390.0).clamp(0.85, 1.2);
       return size * scale;
     }
@@ -161,142 +177,162 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         leading: IconButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.pop(context),
           icon: HugeIcon(
-            icon:HugeIcons.strokeRoundedArrowLeft01,
+            icon: HugeIcons.strokeRoundedArrowLeft01,
             color: isDark ? Colors.white : Colors.black,
           ),
         ),
         backgroundColor: isDark ? Colors.grey[900] : Colors.white,
       ),
       backgroundColor: isDark ? Colors.grey[900] : Colors.white,
-      body: Consumer<ProfileProvider>(
-        builder: (context, provider, child) {
-          /// Do not show shimmer when offline
-          if (provider.isLoading && provider.hasInternet) {
-            return _buildLoadingShimmer(isDark);
-          }
+      // Left/right insets (a notch or a gesture bar sits on the sides when the
+      // phone is sideways) always apply; the bottom one only in landscape, so
+      // portrait keeps its current edge-to-edge scrolling.
+      body: SafeArea(
+        top: false,
+        bottom: context.isLandscape,
+        child: Consumer<ProfileProvider>(
+          builder: (context, provider, child) {
+            if (provider.isLoading && provider.hasInternet) {
+              return _buildLoadingShimmer(context, isDark);
+            }
 
-          if (provider.userData == null) {
-            return ConnectionStatusWidget(
-              serverUnreachable: true,
-              onRetry: () => provider.fetchUserProfile(forceRefresh: true),
-            );
-          }
+            if (provider.userData == null) {
+              final error = ConnectionStatusWidget(
+                serverUnreachable: true,
+                onRetry: () => provider.fetchUserProfile(),
+              );
+              // The error card (~400dp) is taller than a landscape window, so
+              // there it scrolls; with the room it keeps filling the screen
+              // and sitting centred, exactly as before.
+              return LayoutBuilder(
+                builder: (context, constraints) => constraints.maxHeight < 480
+                    ? SingleChildScrollView(child: error)
+                    : error,
+              );
+            }
 
-          return RefreshIndicator(
-            onRefresh: () => provider.fetchUserProfile(forceRefresh: true),
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 12),
-                  ProfileHeaderCard(
-                    name:
-                        provider.userData!['name']?.toString() ??
-                        'Unknown User',
-                    email: provider.normalizeForEdit(
-                      provider.userData!['email'],
-                    ),
-                    jobFunction: provider.normalizeForEdit(
-                      provider.userData!['function'],
-                    ),
-                    avatar: provider.userAvatar,
-                    onCameraPressed: _showImageSourceActionSheet,
-                    showCameraButton: false, /// Hide camera button for now
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const ProfileDetailScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _buildQuickActionsSection(context),
-                  const SizedBox(height: 20),
-                ],
+            final header = ProfileHeaderCard(
+              name: provider.userData!['name']?.toString() ?? 'Unknown User',
+              email: provider.normalizeForEdit(provider.userData!['email']),
+              jobFunction: provider.normalizeForEdit(
+                provider.userData!['function'],
               ),
-            ),
-          );
-        },
+              avatarBase64: provider.userAvatarBase64,
+              onCameraPressed: _showImageSourceActionSheet,
+              showCameraButton: false,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProfileDetailScreen(),
+                  ),
+                );
+              },
+            );
+
+            return RefreshIndicator(
+              onRefresh: () => provider.fetchUserProfile(),
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                // One scrolling column in every orientation; in landscape it
+                // is capped and centred rather than stretched across the
+                // whole width. Portrait keeps the full width.
+                child: ConstrainedContent(
+                  maxWidth: context.isLandscape ? 600 : double.infinity,
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 12),
+                        header,
+                        const SizedBox(height: 12),
+
+                        _buildQuickActionsSection(context),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
 
   Widget _buildQuickActionsSection(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? Colors.grey[900] : Colors.white;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
+      // Clipped, with a transparent Material below, so the rows' ripples show
+      // over the card's fill and stay inside its corners (an InkWell under an
+      // opaque Container paints beneath it).
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
-        ),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              blurRadius: 16,
-              spreadRadius: 2,
-              offset: const Offset(0, 6),
-              color: Colors.black.withOpacity(0.06),
-            ),
-        ],
+        // grey[850] over the page's grey[900] in dark mode, as mobo Billing's
+        // Configuration list. It was the page's own colour, so the list had no
+        // edge there and read as bare rows on the background.
+        color: isDark ? Colors.grey[850] : Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppTheme.cardBorder(isDark), width: 0.5),
+        boxShadow: AppShadows.card,
       ),
-      child: Column(
-        children: [
-          ActionTile(
-            title: 'Settings',
-            subtitle: 'App preferences and sync options',
-            icon:HugeIcons.strokeRoundedSettings01,
-            onTap: () async {
-              try {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const SettingsScreen(),
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          children: [
+            ActionTile(
+              title: 'Settings',
+              subtitle: 'App preferences and sync options',
+              icon: HugeIcons.strokeRoundedSettings01,
+              onTap: () async {
+                try {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => SettingsScreen()),
+                  );
+                } catch (_) {}
+              },
+            ),
+            Divider(
+              height: 1,
+              color: isDark ? Colors.grey[800] : Colors.grey[200],
+            ),
+            const SwitchAccountWidget(),
+            Divider(
+              height: 1,
+              color: isDark ? Colors.grey[800] : Colors.grey[200],
+            ),
+
+            Builder(
+              builder: (outerCtx) => ChangeNotifierProvider<LogoutViewModel>(
+                create: (_) => LogoutViewModel(),
+                child: Builder(
+                  builder: (ctx) => ActionTile(
+                    title: 'Logout',
+                    subtitle: 'Sign out from this device',
+                    icon: HugeIcons.strokeRoundedLogout01,
+                    // The brand colour on the icon and title, so the one row
+                    // that ends the session stands out from the rest.
+                    accentColor: AppTheme.primaryColor,
+                    trailing: const SizedBox.shrink(),
+                    onTap: () => ctx.read<LogoutViewModel>().confirmLogout(ctx),
                   ),
-                );
-              } catch (_) {}
-            },
-          ),
-          Divider(
-            height: 1,
-            color: isDark ? Colors.grey[800] : Colors.grey[200],
-          ),
-          const SwitchAccountWidget(),
-          Divider(
-            height: 1,
-            color: isDark ? Colors.grey[800] : Colors.grey[200],
-          ),
-          /// Scope a local provider to guarantee availability even after hot-reload
-          Builder(
-            builder: (outerCtx) => ChangeNotifierProvider<LogoutViewModel>(
-              create: (_) => LogoutViewModel(),
-              child: Builder(
-                builder: (ctx) => ActionTile(
-                  title: 'Logout',
-                  subtitle: 'Sign out from this device',
-                  icon: HugeIcons.strokeRoundedLogout02,
-                  destructive: true,
-                  trailing: const SizedBox.shrink(),
-                  onTap: () => ctx.read<LogoutViewModel>().confirmLogout(ctx),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildLoadingShimmer(bool isDark) {
+  Widget _buildLoadingShimmer(BuildContext context, bool isDark) {
     final shimmerBase = isDark ? Colors.grey[800]! : Colors.grey[300]!;
     final shimmerHighlight = isDark ? Colors.grey[700]! : Colors.grey[100]!;
     final placeholderColor = isDark ? Colors.grey[900]! : Colors.white;
@@ -304,139 +340,142 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
-      child: Shimmer.fromColors(
-        baseColor: shimmerBase,
-        highlightColor: shimmerHighlight,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            /// Header card shimmer
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 16,
-                    spreadRadius: 2,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 90,
-                    height: 90,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: placeholderColor,
-                      border: Border.all(
-                        color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
-                        width: 2,
+      child: ConstrainedContent(
+        // Capped in landscape only; portrait keeps the full width.
+        maxWidth: context.isLandscape ? 600 : double.infinity,
+        child: Shimmer.fromColors(
+          baseColor: shimmerBase,
+          highlightColor: shimmerHighlight,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 16,
+                      spreadRadius: 2,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: placeholderColor,
+                        border: Border.all(
+                          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+                          width: 2,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 18),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          height: 18,
-                          width: 180,
-                          margin: const EdgeInsets.only(bottom: 8),
-                          decoration: BoxDecoration(
-                            color: placeholderColor,
-                            borderRadius: BorderRadius.circular(6),
+                    const SizedBox(width: 18),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            height: 18,
+                            width: 180,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            decoration: BoxDecoration(
+                              color: placeholderColor,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
                           ),
-                        ),
-                        Container(
-                          height: 14,
-                          width: 160,
-                          margin: const EdgeInsets.only(bottom: 6),
-                          decoration: BoxDecoration(
-                            color: placeholderColor,
-                            borderRadius: BorderRadius.circular(6),
+                          Container(
+                            height: 14,
+                            width: 160,
+                            margin: const EdgeInsets.only(bottom: 6),
+                            decoration: BoxDecoration(
+                              color: placeholderColor,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
                           ),
-                        ),
-                        Container(
-                          height: 12,
-                          width: 120,
-                          decoration: BoxDecoration(
-                            color: placeholderColor,
-                            borderRadius: BorderRadius.circular(6),
+                          Container(
+                            height: 12,
+                            width: 120,
+                            decoration: BoxDecoration(
+                              color: placeholderColor,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            /// Quick actions shimmer
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isDark
-                      ? Colors.white.withOpacity(0.08)
-                      : Colors.black.withOpacity(0.06),
+                  ],
                 ),
               ),
-              child: Column(
-                children: List.generate(2, (index) {
-                  return Padding(
-                    padding: EdgeInsets.only(bottom: index == 1 ? 0 : 16),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: placeholderColor,
-                            borderRadius: BorderRadius.circular(10),
+              const SizedBox(height: 20),
+
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withOpacity(0.08)
+                        : Colors.black.withOpacity(0.06),
+                  ),
+                ),
+                child: Column(
+                  children: List.generate(2, (index) {
+                    return Padding(
+                      padding: EdgeInsets.only(bottom: index == 1 ? 0 : 16),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: placeholderColor,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                height: 14,
-                                width: 120,
-                                margin: const EdgeInsets.only(bottom: 6),
-                                decoration: BoxDecoration(
-                                  color: placeholderColor,
-                                  borderRadius: BorderRadius.circular(6),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  height: 14,
+                                  width: 120,
+                                  margin: const EdgeInsets.only(bottom: 6),
+                                  decoration: BoxDecoration(
+                                    color: placeholderColor,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
                                 ),
-                              ),
-                              Container(
-                                height: 12,
-                                width: 180,
-                                decoration: BoxDecoration(
-                                  color: placeholderColor,
-                                  borderRadius: BorderRadius.circular(6),
+                                Container(
+                                  height: 12,
+                                  width: 180,
+                                  decoration: BoxDecoration(
+                                    color: placeholderColor,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
+                        ],
+                      ),
+                    );
+                  }),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -14,22 +14,28 @@ class StatusTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 8),
         decoration: BoxDecoration(
-          color: isActive ? Colors.black : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.black12),
+          color: isActive
+              ? (isDark ? Colors.white : Colors.black)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isDark ? Colors.grey[700]! : Colors.black12,
+          ),
         ),
         child: Text(
           title,
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: isActive ? Colors.white : Colors.black,
+            color: isActive
+                ? (isDark ? Colors.black : Colors.white)
+                : (isDark ? Colors.white : Colors.black),
           ),
         ),
       ),

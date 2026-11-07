@@ -1,5 +1,5 @@
 # Uncomment this line to define a global platform for your project
-# platform :ios, '13.0'
+# platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -40,13 +40,35 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
 
-    # Enable permissions for permission_handler package
+    # permission_handler: enable only the permissions this app actually uses.
+    # Everything else is compiled out so App Store review does not ask for
+    # purpose strings for APIs the app never calls (ITMS-90683).
     target.build_configurations.each do |config|
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
         '$(inherited)',
-        'PERMISSION_CAMERA=1',
-        'PERMISSION_MICROPHONE=1',
-        'PERMISSION_PHOTOS=1',
+
+        ## Used by this app
+        'PERMISSION_CAMERA=1',                      # QR scanning, profile photo
+        'PERMISSION_MICROPHONE=1',                  # voice search
+        'PERMISSION_PHOTOS=1',                      # gallery picker, attachments
+
+        ## Not used - compiled out
+        'PERMISSION_EVENTS=0',
+        'PERMISSION_EVENTS_FULL_ACCESS=0',
+        'PERMISSION_REMINDERS=0',
+        'PERMISSION_CONTACTS=0',
+        'PERMISSION_SPEECH_RECOGNIZER=0',
+        'PERMISSION_PHOTOS_ADD_ONLY=0',
+        'PERMISSION_LOCATION=0',
+        'PERMISSION_LOCATION_WHENINUSE=0',
+        'PERMISSION_LOCATION_ALWAYS=0',
+        'PERMISSION_NOTIFICATIONS=0',
+        'PERMISSION_MEDIA_LIBRARY=0',
+        'PERMISSION_SENSORS=0',
+        'PERMISSION_BLUETOOTH=0',
+        'PERMISSION_APP_TRACKING_TRANSPARENCY=0',
+        'PERMISSION_CRITICAL_ALERTS=0',
+        'PERMISSION_ASSISTANT=0',
       ]
     end
   end

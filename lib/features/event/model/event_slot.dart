@@ -6,6 +6,7 @@ class EventSlotModel {
   final DateTime endDatetime;
   final int color;
   final String dateTz;
+  final int seatsTaken;
 
   EventSlotModel({
     required this.displayName,
@@ -13,9 +14,9 @@ class EventSlotModel {
     required this.endDatetime,
     required this.color,
     required this.dateTz,
-    required this.id
+    required this.id,
+    this.seatsTaken = 0,
   });
-
 
   factory EventSlotModel.fromJson(Map<String, dynamic> json) {
     return EventSlotModel(
@@ -23,11 +24,11 @@ class EventSlotModel {
       startDatetime: _safeDate (json['start_datetime']),
       endDatetime: _safeDate(json['end_datetime']),
       color: json['color'] ?? 0,
-      dateTz: json['date_tz'] ?? '',
-      id: json['id']
+      dateTz: json['date_tz'] is String ? json['date_tz'] : '',
+      id: json['id'],
+      seatsTaken: json['seats_taken'] is int ? json['seats_taken'] : 0,
     );
   }
-
 
   static DateTime _safeDate(dynamic v) {
     try {
@@ -45,8 +46,7 @@ class EventSlotModel {
 
         return DateTime.parse(cleaned).toLocal();
       }
-    } catch (e) {
-    }
+    } catch (_) {}
     return DateTime.now();
   }
 

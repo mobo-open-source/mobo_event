@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:mobo_event/features/registration/model/demo_question_answer.dart';
 
-import '../../../core/const/app_colors.dart';
+import '../../../core/theme/app_theme.dart';
 
+/// Same card shell/layout as the event's "Questions Information" list
+/// ([QuestionCard]) — plain icon, title + grey subtitle, trailing "⋮" with a
+/// single red Delete item — instead of this card's previous, differently
+/// styled look (tinted icon box, inline delete icon button).
 class QuestionAnswerCard extends StatelessWidget {
   final DemoQuestionAnswer questionAnswer;
   final VoidCallback onDelete;
@@ -16,96 +20,88 @@ class QuestionAnswerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final subtitle = questionAnswer.selectedValue?.isNotEmpty == true
+        ? questionAnswer.selectedValue!
+        : (questionAnswer.answer?.isNotEmpty == true
+              ? questionAnswer.answer!
+              : "No answer");
+
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(10),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 3),
-          ),
-        ],
-        border: Border.all(color: Colors.grey.shade300),
+        color: AppTheme.surface(isDark),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppTheme.cardBorder(isDark), width: 0.5),
+        boxShadow: const [AppShadows.cardShadow],
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const HugeIcon(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            HugeIcon(
               icon: HugeIcons.strokeRoundedMessageQuestion,
-              size: 20,
-              color: Colors.blue,
+              size: 22,
+              color: AppTheme.secondaryLabelColor(isDark),
             ),
-          ),
-
-          const SizedBox(width: 12),
-
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  questionAnswer.questionName ?? "Question",
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 6),
-
-                if (questionAnswer.selectedValue != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      questionAnswer.selectedValue!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade800,
-                        fontWeight: FontWeight.w500,
-                      ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    questionAnswer.questionName ?? "Question",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimaryOn(isDark),
                     ),
                   ),
-
-                if (questionAnswer.answer != null &&
-                    questionAnswer.answer!.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      questionAnswer.answer!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade800,
-                        fontWeight: FontWeight.w500,
-                      ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.secondaryLabelColor(isDark),
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
-          ),
-
-          IconButton(
-            onPressed: onDelete,
-            icon: const HugeIcon(
-              icon: HugeIcons.strokeRoundedDelete02,
-              size: 20,
-              color: Colors.red,
+            PopupMenuButton<String>(
+              padding: EdgeInsets.zero,
+              position: PopupMenuPosition.under,
+              icon: Icon(
+                Icons.more_vert,
+                size: 20,
+                color: isDark ? Colors.white : Colors.black,
+              ),
+              onSelected: (value) {
+                if (value == 'delete') onDelete();
+              },
+              itemBuilder: (context) {
+                return [
+                  const PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, size: 18, color: StatusColors.red),
+                        SizedBox(width: 10),
+                        Text('Delete', style: TextStyle(color: StatusColors.red)),
+                      ],
+                    ),
+                  ),
+                ];
+              },
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

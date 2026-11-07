@@ -26,7 +26,6 @@ class ConfirmDiscardDialog extends StatelessWidget {
       secondaryLabel: cancelLabel,
       onSecondary: () => Navigator.pop(context, false),
       primaryLabel: discardLabel,
-      destructivePrimary: true,
       onPrimary: () => Navigator.pop(context, true),
     );
   }

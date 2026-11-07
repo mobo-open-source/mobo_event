@@ -1,6 +1,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../core/theme/app_theme.dart';
 
 class EventMailScheduler {
   final int id;
@@ -72,9 +73,7 @@ class EventMailScheduler {
         v.split('.').first.replaceAll(' ', 'T').padRight(20, 'Z');
         return DateTime.parse(cleaned).toLocal();
       }
-    } catch (e) {
-
-    }
+    } catch (_) {}
     return DateTime.now();
   }
 
@@ -104,7 +103,6 @@ class EventMailScheduler {
       scheduledDate: json['scheduled_date'] != null
           ? _safeDate(json['scheduled_date'])
           : null,
-
 
       lastRegistrationId: json['last_registration_id'] is int
           ? json['last_registration_id']
@@ -157,8 +155,8 @@ extension EventMailSchedulerUI on EventMailScheduler {
   }
 
   Color get notificationColor {
-    if (isSms) return Colors.green;
-    if (isMail) return Colors.blue;
+    if (isSms) return StatusColors.green;
+    if (isMail) return StatusColors.blue;
     return Colors.grey;
   }
 

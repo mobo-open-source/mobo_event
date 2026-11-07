@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 
 class SectionCard extends StatelessWidget {
   final String title;
@@ -17,24 +18,21 @@ class SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? Colors.grey[900] : Colors.white;
+    // Was Colors.grey[900] — identical to this screen's own dark scaffold
+    // background (settings_screen.dart), so a card had no contrast against
+    // the page behind it and was effectively invisible. AppTheme.darkSurface
+    // is this app's actual "card on a dark scaffold" tone.
+    final cardColor = isDark ? AppTheme.darkSurface : Colors.white;
     final borderColor = isDark ? Colors.grey[800]! : Colors.grey[200]!;
 
     return Container(
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(12),
-
-        boxShadow: [
-          BoxShadow(
-            color: isDark
-                ? Colors.black.withOpacity(0.05)
-                : Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            spreadRadius: 2,
-            offset: const Offset(0, 6),
-          ),
-        ],
+        // Computed above but never actually applied — another reason a
+        // card's edge was indistinguishable from the page in dark mode.
+        border: Border.all(color: borderColor, width: 0.5),
+        boxShadow: [AppShadows.cardShadow],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -43,7 +41,6 @@ class SectionCard extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-
                 Expanded(
                   child: Text(
                     title,
@@ -56,9 +53,7 @@ class SectionCard extends StatelessWidget {
                     maxLines: 1,
                   ),
                 ),
-                if (headerTrailing != null) ...[
-                  headerTrailing!,
-                ],
+                if (headerTrailing != null) ...[headerTrailing!],
               ],
             ),
           ),

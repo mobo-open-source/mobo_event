@@ -22,7 +22,6 @@ class ConnectivityService {
 
   /// Start monitoring connectivity (idempotent)
   void startMonitoring() {
-    /// Initial probe
     _probeInternet();
     _probeServer();
     _connectivity.onConnectivityChanged.listen((List<ConnectivityResult> results) async {
@@ -42,9 +41,9 @@ class ConnectivityService {
   Future<void> _probeServer() async {
     final url = _currentServerUrl;
     if (url == null) return;
-    /// Only meaningful to probe server if we have internet
+    // Only meaningful to probe server if we have internet
     if (!_lastInternetReachable) {
-      /// When internet is down, we implicitly consider server unreachable, but we don't spam stream unless state changes
+      // When internet is down, we implicitly consider server unreachable, but we don't spam stream unless state changes
       if (_lastServerReachable != false) {
         _lastServerReachable = false;
         _serverController.add(false);

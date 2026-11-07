@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 
-/// Reusable status badge widget for displaying states with colors
-/// Used for transfers, orders, invoices, etc.
+import '../../../core/theme/app_theme.dart';
+
+/// Reusable status badge (CLAUDE.md §10 — canonical formula).
+///
+/// No border, tinted fill, radius 18, 11/w600 text with `letterSpacing: 0.1`.
+/// Colour always comes from the [StatusColors] semantic map (§1) — never from a
+/// raw Material colour.
 class StatusBadge extends StatelessWidget {
   final String status;
   final StatusBadgeStyle? style;
@@ -12,144 +17,123 @@ class StatusBadge extends StatelessWidget {
     this.style,
   });
 
-  /// Factory for transfer states
+  /// Factory for transfer states.
   factory StatusBadge.transfer(String state) {
-    return StatusBadge(
-      status: state,
-      style: _getTransferStyle(state),
-    );
+    return StatusBadge(status: state, style: _getTransferStyle(state));
   }
 
-  /// Factory for order states
+  /// Factory for order states.
   factory StatusBadge.order(String state) {
-    return StatusBadge(
-      status: state,
-      style: _getOrderStyle(state),
-    );
+    return StatusBadge(status: state, style: _getOrderStyle(state));
   }
 
-  /// Factory for invoice states
+  /// Factory for invoice states.
   factory StatusBadge.invoice(String state) {
-    return StatusBadge(
-      status: state,
-      style: _getInvoiceStyle(state),
-    );
+    return StatusBadge(status: state, style: _getInvoiceStyle(state));
   }
 
   static StatusBadgeStyle _getTransferStyle(String state) {
     switch (state.toLowerCase()) {
       case 'draft':
-        return StatusBadgeStyle(
+        return const StatusBadgeStyle(
           label: 'Draft',
-          color: Colors.grey,
-          icon: Icons.edit_outlined,
+          color: StatusColors.orange,
         );
       case 'waiting':
-        return StatusBadgeStyle(
-          label: 'Waiting',
-          color: Colors.orange,
-          icon: Icons.hourglass_empty,
-        );
       case 'confirmed':
-        return StatusBadgeStyle(
+        return const StatusBadgeStyle(
           label: 'Waiting',
-          color: Colors.orange,
-          icon: Icons.hourglass_empty,
+          color: StatusColors.orange,
         );
       case 'assigned':
-        return StatusBadgeStyle(
+        return const StatusBadgeStyle(
           label: 'Ready',
-          color: Colors.blue,
-          icon: Icons.assignment_turned_in_outlined,
+          color: StatusColors.blue,
         );
       case 'done':
-        return StatusBadgeStyle(
+        return const StatusBadgeStyle(
           label: 'Done',
-          color: Colors.green,
-          icon: Icons.check_circle,
+          color: StatusColors.green,
         );
       case 'cancel':
       case 'cancelled':
-        return StatusBadgeStyle(
+        return const StatusBadgeStyle(
           label: 'Cancelled',
-          color: Colors.red,
-          icon: Icons.cancel_outlined,
+          color: StatusColors.red,
         );
       default:
-        return StatusBadgeStyle(
-          label: state,
-          color: Colors.grey,
-        );
+        return StatusBadgeStyle(label: state, color: StatusColors.grey);
     }
   }
 
   static StatusBadgeStyle _getOrderStyle(String state) {
     switch (state.toLowerCase()) {
       case 'draft':
-        return StatusBadgeStyle(label: 'Draft', color: Colors.grey);
+        return const StatusBadgeStyle(
+          label: 'Draft',
+          color: StatusColors.orange,
+        );
       case 'sent':
-        return StatusBadgeStyle(label: 'Sent', color: Colors.blue);
+        return const StatusBadgeStyle(
+          label: 'Sent',
+          color: StatusColors.blue,
+        );
       case 'sale':
-        return StatusBadgeStyle(label: 'Sale Order', color: Colors.green);
+        return const StatusBadgeStyle(
+          label: 'Sale Order',
+          color: StatusColors.green,
+        );
       case 'done':
-        return StatusBadgeStyle(label: 'Done', color: Colors.green);
+        return const StatusBadgeStyle(
+          label: 'Done',
+          color: StatusColors.green,
+        );
       case 'cancel':
-        return StatusBadgeStyle(label: 'Cancelled', color: Colors.red);
+        return const StatusBadgeStyle(
+          label: 'Cancelled',
+          color: StatusColors.red,
+        );
       default:
-        return StatusBadgeStyle(label: state, color: Colors.grey);
+        return StatusBadgeStyle(label: state, color: StatusColors.grey);
     }
   }
 
   static StatusBadgeStyle _getInvoiceStyle(String state) {
     switch (state.toLowerCase()) {
       case 'draft':
-        return StatusBadgeStyle(label: 'Draft', color: Colors.grey);
+        return const StatusBadgeStyle(
+          label: 'Draft',
+          color: StatusColors.orange,
+        );
       case 'posted':
-        return StatusBadgeStyle(label: 'Posted', color: Colors.blue);
+        return const StatusBadgeStyle(
+          label: 'Posted',
+          color: StatusColors.green,
+        );
       case 'paid':
-        return StatusBadgeStyle(label: 'Paid', color: Colors.green);
+        return const StatusBadgeStyle(
+          label: 'Paid',
+          color: StatusColors.green,
+        );
       case 'cancel':
-        return StatusBadgeStyle(label: 'Cancelled', color: Colors.red);
+        return const StatusBadgeStyle(
+          label: 'Cancelled',
+          color: StatusColors.red,
+        );
       default:
-        return StatusBadgeStyle(label: state, color: Colors.grey);
+        return StatusBadgeStyle(label: state, color: StatusColors.grey);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final badgeStyle = style ?? StatusBadgeStyle(label: status, color: Colors.grey);
+    final badgeStyle =
+        style ?? StatusBadgeStyle(label: status, color: StatusColors.grey);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: badgeStyle.color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: badgeStyle.color.withOpacity(0.3),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (badgeStyle.icon != null) ...[
-            Icon(
-              badgeStyle.icon,
-              size: 14,
-              color: badgeStyle.color,
-            ),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            badgeStyle.label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: badgeStyle.color,
-            ),
-          ),
-        ],
-      ),
+    return StatusColors.buildStatusBadge(
+      context,
+      badgeStyle.label,
+      color: badgeStyle.color,
     );
   }
 }
@@ -157,11 +141,9 @@ class StatusBadge extends StatelessWidget {
 class StatusBadgeStyle {
   final String label;
   final Color color;
-  final IconData? icon;
 
   const StatusBadgeStyle({
     required this.label,
     required this.color,
-    this.icon,
   });
 }

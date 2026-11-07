@@ -1,16 +1,18 @@
 import 'dart:convert';
+import 'published_toggle.dart';
+import 'create_slots_button.dart';
+import '../../../shared/widgets/toggles/mobo_checkbox.dart';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show mapEquals;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mobo_event/app/home_scaffold.dart';
 import 'package:mobo_event/features/event/services/event_detailed_services.dart';
 import 'package:mobo_event/features/event/widget/field.dart';
 import 'package:mobo_event/features/event/widget/ticket_line_widget.dart';
-import 'package:mobo_event/features/event/widget/time_zone/time_zone.dart';
 import 'package:provider/provider.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/standalone.dart' as tz;
@@ -18,55 +20,76 @@ import 'package:timezone/standalone.dart' as tz;
 import '../../../core/const/app_colors.dart';
 import '../../../shared/helper/helper_method.dart';
 import '../../../shared/widgets/back_dialog/show_back_dialog.dart';
+import '../../../shared/widgets/dialogs/pinned_footer_layout.dart';
+import '../../../shared/widgets/forms/dashed_border_box.dart';
+import '../../../shared/widgets/forms/field_label.dart';
+import '../../../shared/widgets/forms/mobo_select_field.dart';
 import '../../../shared/widgets/loading/loading_widget.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
+import '../../home/providers/home_provider.dart';
 import '../../review/services/review_service.dart';
 import '../helper/time_zone.dart';
 import '../model/fetch_model.dart';
 import '../provider/event_detailed_provider.dart';
 import 'event_calender.dart';
+import 'event_status_field.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/pinned_action_bar.dart';
+import '../../../core/utils/screen_layout.dart';
 
 class CreateForm extends StatefulWidget {
   const CreateForm({super.key});
 
   @override
-  State<CreateForm> createState() => _CreateFormState();
+  State<CreateForm> createState() => CreateFormState();
 }
 
-class _CreateFormState extends State<CreateForm> {
+class CreateFormState extends State<CreateForm> {
   @override
   void initState() {
     super.initState();
 
     final provider = Provider.of<EventDetailedProvider>(context, listen: false);
     eventNameController.addListener(() => setState(() {}));
+    _loadAllTags();
+
+    // A new event starts on the first stage by sequence — what Odoo's own
+    // `_get_default_stage_id` gives it — and only a different pick is sent.
+    final firstStage = Provider.of<HomeProvider>(
+      context,
+      listen: false,
+    ).orderedStages.firstOrNull;
+    if (firstStage != null) {
+      _defaultStage = FetchModel(id: firstStage.id, name: firstStage.name);
+      selectedStage = _defaultStage;
+    }
 
     final data = provider.sampleEvent;
 
-    if (data == null) return;
+    if (data == null) {
+      _initialValues = _currentValues();
+      return;
+    }
 
     setState(() {
-      eventOrganiserController.text = data.value.organizerId.displayName;
       selectedOrganiser = FetchModel(
         id: data.value.organizerId.id,
         name: data.value.organizerId.displayName,
       );
-      eventResponsibleController.text = data.value.userId.displayName;
       responsible = FetchModel(
         id: data.value.userId.id,
         name: data.value.userId.displayName,
       );
-      location.text = data.value.addressId.displayName;
       selectedLocation = FetchModel(
         id: data.value.addressId.id,
         name: data.value.addressId.displayName,
       );
-      company.text = data.value.companyId.displayName;
       selectedCompany = FetchModel(
         id: data.value.companyId.id,
         name: data.value.companyId.displayName,
       );
       selectedTimezone = data.value.dateTz;
+      websitePublished = data.value.websitePublished;
       fromDate = data.value.dateBegin;
       toDate = data.value.dateEnd;
       if (fromDate != null) {
@@ -75,38 +98,79 @@ class _CreateFormState extends State<CreateForm> {
       if (toDate != null) {
         toDateController.text = _format(toDate!);
       }
+      _initialValues = _currentValues();
     });
   }
 
+  /// What the form held once its defaults were filled in. Leaving only asks
+  /// for confirmation when the current values differ from it.
+  Map<String, Object?>? _initialValues;
+  Uint8List? _initialImage;
+
+  /// Everything the user can set, reduced to something `==` can compare.
+  Map<String, Object?> _currentValues() => {
+    'name': eventNameController.text.trim(),
+    'organizer': selectedOrganiser?.id,
+    'responsible': responsible?.id,
+    'location': selectedLocation?.id,
+    'company': selectedCompany?.id,
+    'stage': selectedStage?.id,
+    'kanbanState': kanbanState,
+    'template': selectedTemplate?.id,
+    'website': selectedWebsite?.id,
+    'tags': (selectedTags.map((t) => t.id).toList()..sort()).join(','),
+    'timezone': selectedTimezone,
+    'from': fromDate,
+    'to': toDate,
+    'multipleSlot': multipleSlot,
+    'limitRegistration': limitRegistration,
+    'seatLimit': seatLimit.text.trim(),
+    'websiteSubMenu': websiteSubMenu,
+    'boothRegister': boothRegister,
+    'showcaseTrack': showcaseTrack,
+    'allowTrackProposal': allowTrackProposal,
+    'showcaseExhibitory': showcaseExhibitory,
+    'websitePublished': websitePublished,
+    'visibility': selectedLabel,
+    'onlineUrl': onlineUrl.text.trim(),
+    'tickets': Provider.of<EventDetailedProvider>(
+      context,
+      listen: false,
+    ).dummyTicketList.length,
+  };
+
+  /// True once anything differs from the freshly opened form — what the
+  /// screen's back button checks before warning about lost data.
+  bool get hasChanges =>
+      _initialValues != null &&
+      (!mapEquals(_currentValues(), _initialValues) ||
+          !identical(fileBytes, _initialImage));
+
   final eventNameController = TextEditingController();
-  final eventOrganiserController = TextEditingController();
-  final eventResponsibleController = TextEditingController();
-  final location = TextEditingController();
-  final company = TextEditingController();
-  final template = TextEditingController();
-  final website = TextEditingController();
-  final tags = TextEditingController();
   final visibility = TextEditingController();
   final onlineUrl = TextEditingController();
   final fromDateController = TextEditingController();
   final toDateController = TextEditingController();
   final seatLimit = TextEditingController();
-  final SuggestionsController<FetchModel> suggestionsController =
-      SuggestionsController<FetchModel>();
   DateTime? fromDate;
   DateTime? toDate;
   bool multipleSlot = false;
+
+  /// True while "Create Slots" is creating the event it needs. That runs
+  /// without a blocking dialog, so this is what stops a second tap (on it, or
+  /// on Create Event) from creating the event twice.
+  bool _creatingForSlots = false;
   bool limitRegistration = false;
   bool websiteSubMenu = false;
   bool boothRegister = false;
   bool showcaseTrack = false;
   bool allowTrackProposal = false;
   bool showcaseExhibitory = false;
+  bool websitePublished = false;
   bool isLoading = true;
   bool templateLoading = false;
   String? selectedTimezone;
   String selectedLabel = "Public";
-  int slot = 0;
   final Map<String, String> visibilityTypes = {
     "Public": "public",
     "Via a Link": "link",
@@ -122,10 +186,48 @@ class _CreateFormState extends State<CreateForm> {
   FetchModel? responsible;
   FetchModel? selectedLocation;
   FetchModel? selectedCompany;
+  FetchModel? selectedStage;
+
+  /// The stage the server would assign on its own; [selectedStage] starts here.
+  FetchModel? _defaultStage;
+
+  /// The event's status (`kanban_state`); a new event is In Progress.
+  String kanbanState = 'normal';
   FetchModel? selectedTemplate;
   FetchModel? selectedWebsite;
   List<FetchModel> selectedTags = [];
-  final FocusNode tagFocusNode = FocusNode();
+
+  /// Every event tag, loaded once for the tag multi-select.
+  List<FetchModel> allTags = [];
+
+  Future<void> _loadAllTags() async {
+    try {
+      final tags = await service.getTypeHeadSearchListTags(model: 'event.tag');
+      if (!mounted) return;
+      setState(() => allTags = tags);
+    } catch (_) {
+      // The field still lists the tags already chosen; there is just
+      // nothing new to offer.
+    }
+  }
+
+  /// Server search behind a many2one picker: the [model] records matching
+  /// the panel's search text, as select options.
+  Future<List<MoboSelectOption<FetchModel>>> _searchOptions(
+    String model,
+    String query, {
+    List domain = const [],
+  }) async {
+    final records = await service.getTypeHeadSearchList(
+      model: model,
+      search: query,
+      domain: domain,
+      limit: 20,
+    );
+    return records
+        .map((m) => MoboSelectOption(value: m, label: m.name ?? ''))
+        .toList();
+  }
 
   String toOdooDateTime(DateTime dt) {
     final utc = dt.toUtc();
@@ -137,27 +239,120 @@ class _CreateFormState extends State<CreateForm> {
         "${utc.second.toString().padLeft(2, '0')}";
   }
 
+  /// date_tz can come back empty (e.g. a user with no tz); fall back to UTC
+  /// like Odoo's slot calendar does instead of throwing.
+  tz.Location _eventLocation(String name) {
+    try {
+      return tz.getLocation(name);
+    } catch (_) {
+      return tz.getLocation('UTC');
+    }
+  }
+
   bool get isFormValid =>
-      eventNameController.text.isNotEmpty &&
+      eventNameController.text.trim().isNotEmpty &&
       selectedTimezone != null &&
       fromDate != null &&
       toDate != null;
 
-  Widget _dateField(TextEditingController controller, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF1F3F5),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
+  /// Mirrors event.event's server-side checks so the user gets a readable
+  /// message instead of a raw ValidationError.
+  String? _validationError() {
+    if (!isFormValid) return "Please ensure all required fields are filled.";
+    // _check_closing_date (Odoo 17 through 20).
+    if (toDate!.isBefore(fromDate!)) {
+      return "The end date cannot be earlier than the start date.";
+    }
+    if (limitRegistration && (int.tryParse(seatLimit.text.trim()) ?? 0) <= 0) {
+      return "Enter a registration limit greater than 0.";
+    }
+    return null;
+  }
 
-          child: Text(controller.text),
+  /// event.event create vals — shared by "Create Event" and the
+  /// create-then-add-slots path so both send the same record.
+  Map<String, dynamic> _buildPayload(EventDetailedProvider provider) {
+    return {
+      'name': eventNameController.text.trim(),
+      'organizer_id': selectedOrganiser?.id ?? false,
+      'user_id': responsible?.id ?? false,
+      'address_id': selectedLocation?.id ?? false,
+      'company_id': selectedCompany?.id ?? false,
+      'tag_ids': [
+        [6, 0, selectedTags.map((e) => e.id).toList()],
+      ],
+      if (provider.dummyTicketList.isNotEmpty)
+        'event_ticket_ids': provider.buildEventTicketCommands(
+          provider.dummyTicketList,
         ),
-      ),
+      'is_multi_slots': multipleSlot,
+      'date_tz': selectedTimezone ?? false,
+      'date_begin': toOdooDateTime(fromDate!),
+      'date_end': toOdooDateTime(toDate!),
+      'website_menu': websiteSubMenu,
+      'booth_menu': boothRegister,
+      'website_track': showcaseTrack,
+      'website_track_proposal': allowTrackProposal,
+      'exhibitor_menu': showcaseExhibitory,
+      // Dropped by buildSafePayload on a server without website_event.
+      'website_published': websitePublished,
+      'seats_limited': limitRegistration,
+      'seats_max': limitRegistration
+          ? (int.tryParse(seatLimit.text.trim()) ?? 0)
+          : 0,
+      'website_visibility': visibilityTypes[selectedLabel],
+      // event_url only applies to online events (no address), as in Odoo's form.
+      'event_url': selectedLocation == null ? onlineUrl.text.trim() : false,
+      'event_type_id': selectedTemplate?.id ?? false,
+      // Left out while it is still the default, so the server keeps the
+      // choice (and a stale local stage list can't fail the create).
+      if (selectedStage != null && selectedStage != _defaultStage)
+        'stage_id': selectedStage!.id,
+      // Left out while it is the default. A create states it outright, so a
+      // stage pick can't reset it (that only happens on write).
+      if (kanbanState != 'normal') 'kanban_state': kanbanState,
+      if (selectedWebsite != null) 'website_id': selectedWebsite!.id,
+      'image_1024': fileBytes != null ? base64Encode(fileBytes!) : false,
+    };
+  }
+
+  /// Date/time field — same filled recipe as [Field], read-only with a
+  /// leading calendar icon (matches mobo_fleet's `_widgetVehiclesDatePicker`).
+  Widget _dateField(TextEditingController controller, VoidCallback onTap) {
+    return Builder(
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          child: Container(
+            width: double.infinity,
+            // 1px less than the 14×12 inset, to make room for the outline.
+            padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 11),
+            decoration: BoxDecoration(
+              color: AppTheme.inputFill(isDark),
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(color: AppTheme.restingBorderColor(isDark)),
+            ),
+            child: Row(
+              children: [
+                HugeIcon(
+                  icon: HugeIcons.strokeRoundedCalendar03,
+                  size: 20,
+                  color: isDark ? Colors.white : Colors.grey[700],
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    controller.text,
+                    style: AppTheme.fieldValueStyle(isDark),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -172,14 +367,22 @@ class _CreateFormState extends State<CreateForm> {
       initialDate: base ?? now,
 
       builder: (context, child) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: primaryColor,
-              onPrimary: Colors.white,
-              surface: Colors.white,
-              onSurface: Colors.black87,
-            ),
+            colorScheme: isDark
+                ? ColorScheme.dark(
+                    primary: primaryColor,
+                    onPrimary: Colors.white,
+                    surface: AppTheme.darkSurface,
+                    onSurface: Colors.white,
+                  )
+                : ColorScheme.light(
+                    primary: primaryColor,
+                    onPrimary: Colors.white,
+                    surface: Colors.white,
+                    onSurface: Colors.black87,
+                  ),
             datePickerTheme: DatePickerThemeData(
               headerBackgroundColor: primaryColor,
               headerForegroundColor: Colors.white,
@@ -201,13 +404,23 @@ class _CreateFormState extends State<CreateForm> {
           : TimeOfDay.now(),
 
       builder: (context, child) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: primaryColor,
-              onPrimary: Colors.white,
-              onSurface: Colors.black,
-            ),
+            colorScheme: isDark
+                ? const ColorScheme.dark(
+                    primary: primaryColor,
+                    onPrimary: Colors.white,
+                    surface: AppTheme.darkSurface,
+                    onSurface: Colors.white,
+                  )
+                : const ColorScheme.light(
+                    primary: primaryColor,
+                    onPrimary: Colors.white,
+                    onSurface: Colors.black,
+                  ),
+            timePickerTheme: AppTheme.timePickerTheme(isDark),
+            textSelectionTheme: AppTheme.timePickerTextSelection,
           ),
           child: child!,
         );
@@ -266,25 +479,35 @@ class _CreateFormState extends State<CreateForm> {
   }
 
   Widget _uploadButton() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return InkWell(
       onTap: pickBackground,
-      child: Container(
-        height: 150,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(5),
-          color: fillColor,
-        ),
-        child: const Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              HugeIcon(
-                icon: HugeIcons.strokeRoundedFileUpload,
-                color: Colors.black,
-              ),
-              SizedBox(width: 8),
-              Text("Upload Image", style: TextStyle(color: Colors.black)),
-            ],
+      child: DashedBorderBox(
+        borderRadius: 5,
+        color: isDark ? Colors.grey[600]! : Colors.grey[400]!,
+        child: Container(
+          height: 150,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(5),
+            color: isDark ? Colors.grey[850] : fillColor,
+          ),
+          child: Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                HugeIcon(
+                  icon: HugeIcons.strokeRoundedFileUpload,
+                  color: isDark ? Colors.white : Colors.black,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  "Upload Image",
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -297,7 +520,16 @@ class _CreateFormState extends State<CreateForm> {
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            IconButton(onPressed: pickBackground, icon: Icon(Icons.edit)),
+            // The edit icon the other Mobo apps use, in their grey.
+            IconButton(
+              onPressed: pickBackground,
+              icon: HugeIcon(
+                icon: HugeIcons.strokeRoundedPencilEdit02,
+                color: AppTheme.secondaryLabelColor(
+                  Theme.of(context).brightness == Brightness.dark,
+                ),
+              ),
+            ),
             IconButton(
               onPressed: removeBackground,
               icon: HugeIcon(
@@ -321,885 +553,511 @@ class _CreateFormState extends State<CreateForm> {
     );
   }
 
+  /// Slots need an event id, so the event is created first — same as Odoo,
+  /// where the slot calendar only opens from a saved event. While it runs the
+  /// Create Slots button spins and ignores taps; the calendar replaces this
+  /// screen when the event exists.
+  Future<void> _createEventForSlots() async {
+    final error = _validationError();
+    if (error != null) {
+      CustomSnackbar.showWarning(context, error);
+      return;
+    }
+
+    bool confirm = await showBackDialog(
+      context,
+      title: 'Add Slots',
+      subtitle:
+          "The event will be created before you can add slots. Do you want to continue?",
+      leftButtonName: "Cancel",
+      rightButtonName: "Create",
+      function: () {
+        Navigator.pop(context, true);
+      },
+    );
+    if (!confirm || !mounted) return;
+
+    final provider = Provider.of<EventDetailedProvider>(context, listen: false);
+    // No dialog here: the Create Slots button spins instead, and the calendar
+    // opens when it is done.
+    setState(() => _creatingForSlots = true);
+    try {
+      final payloadFiltered = await provider.buildSafePayload(
+        _buildPayload(provider),
+      );
+      final id = await service.createEvent(vals: payloadFiltered);
+      if (id == null) {
+        throw Exception("Some server Issue please check your server");
+      }
+
+      provider.clearDummyTicket();
+      await provider.fetchEventDetails(id);
+      ReviewService().trackSignificantEvent();
+
+      tz.initializeTimeZones();
+      final event = provider.eventModel!;
+      final location = _eventLocation(event.timezone);
+      final from = tz.TZDateTime.from(event.start.toUtc(), location);
+      final to = tz.TZDateTime.from(event.end.toUtc(), location);
+
+      if (!mounted) return;
+      CustomSnackbar.showSuccess(context, "Successfully Created Event");
+      // The event now exists, so the create screen is replaced — leaving it
+      // underneath would let the user create the same event a second time.
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              CalendarScreen(eventId: event.id, fromDate: from, toDate: to),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _creatingForSlots = false);
+      CustomSnackbar.showError(context, cleanedError(e.toString()));
+    }
+  }
+
   Widget _check(String t, bool v, Function(bool) on) =>
-      CheckboxListTile(value: v, title: Text(t), onChanged: (x) => on(x!));
+      MoboCheckboxTile(
+        title: t,
+        value: v,
+        onChanged: on,
+        checkboxAtEnd: true,
+        padding: formToggleRowPadding,
+      );
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // A phone on its side is 700-900dp wide: cap the form so its fields
+    // aren't stretched across all of it, and trim the footer so the fields
+    // keep the little height there is. Upright, both are no-ops.
+    final maxWidth = context.isLandscape ? 600.0 : double.infinity;
+    final compact = context.isShortScreen;
     return Consumer<EventDetailedProvider>(
       builder: (context, provider, child) {
-        return SingleChildScrollView(
+        final fields = Padding(
           padding: const EdgeInsets.all(20),
 
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _card("Event Information", [
-                _label("Event Name *"),
-                Field(
-                  controller: eventNameController,
-                  hint: "Enter your event name",
-                ),
-
-                _label("Time zone *"),
-                SearchableTimezoneDropdown(
-                  timezones: odooTimezones,
-                  value: selectedTimezone,
-                  onChanged: (value) {
-                    setState(() {
-                      selectedTimezone = value;
-                    });
-                  },
-                ),
-                _label("From Date & Time"),
-                _dateField(fromDateController, () async {
-                  await pickDateTime(true);
-                }),
-
-                _label("To Date & Time"),
-                _dateField(toDateController, () async {
-                  await pickDateTime(false);
-                }),
-
-                if (provider.eventFields.containsKey('image_1024')) ...[
-                  _label("Event Image"),
-                  if (fileBytes == null) _uploadButton() else _imagePreview(),
-                ],
-
-                if (provider.eventFields.containsKey('is_multi_slots')) ...[
-                  _check(
-                    "Multiple Slot",
-                    multipleSlot,
-                    (v) => setState(() => multipleSlot = v),
+          child: ConstrainedContent(
+            maxWidth: maxWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _card("Event Information", [
+                  _label("Event Name", isRequired: true),
+                  Field(
+                    controller: eventNameController,
+                    hint: "Enter your event name",
                   ),
 
-                  if (multipleSlot) ...[
-                    InkWell(
-                      onTap: () async {
-                        bool confirm = await showBackDialog(
-                          context,
-                          title: 'Slot Page',
-                          subtitle:
-                              "Please save the event before adding slots. Are you sure you want to go to the slot page?",
-                          leftButtonName: "Cancel",
-                          rightButtonName: "Save",
-                          function: () {
-                            Navigator.pop(context, true);
-                          },
-                        );
+                  _label("Time zone", isRequired: true),
+                  MoboSingleSelectField<String>(
+                    selected: selectedTimezone,
+                    // Still names a zone the list lacks, as the old picker did.
+                    selectedLabel: selectedTimezone,
+                    options: odooTimezones
+                        .map(
+                          (zone) => MoboSelectOption(value: zone, label: zone),
+                        )
+                        .toList(),
+                    onChanged: (v) => setState(() => selectedTimezone = v),
+                    searchable: true,
+                    allowClear: false,
+                    hintText: 'Select time zone',
+                    panelTitle: 'Select Time Zone',
+                  ),
+                  _label("From Date & Time"),
+                  _dateField(fromDateController, () async {
+                    await pickDateTime(true);
+                  }),
 
-                        if (confirm) {
-                          if (isFormValid) {
-                            try {
-                              loadingDialog(
-                                context,
-                                "Updating Event",
-                                "Please wait while we Updating Event",
-                                LoadingAnimationWidget.fourRotatingDots(
-                                  color: primaryColor,
-                                  size: 30,
-                                ),
-                              );
+                  _label("To Date & Time"),
+                  _dateField(toDateController, () async {
+                    await pickDateTime(false);
+                  }),
 
-                              /// create payload for event
+                  if (provider.eventFields.containsKey('image_1024')) ...[
+                    _label("Event Image"),
+                    if (fileBytes == null) _uploadButton() else _imagePreview(),
+                  ],
 
-                              Map<String, dynamic> payload = {
-                                'name': eventNameController.text.trim(),
-                                'organizer_id': selectedOrganiser != null
-                                    ? selectedOrganiser!.id
-                                    : false,
-                                'user_id': responsible != null
-                                    ? responsible!.id
-                                    : false,
-                                'address_id': selectedLocation != null
-                                    ? selectedLocation!.id
-                                    : false,
-                                'company_id': selectedCompany != null
-                                    ? selectedCompany!.id
-                                    : false,
-                                'tag_ids': [
-                                  [
-                                    6,
-                                    0,
-                                    selectedTags.map((e) => e.id).toList(),
-                                  ],
-                                ],
-                                'date_tz': selectedTimezone ?? false,
-
-                                'is_multi_slots': multipleSlot,
-                                'date_begin': toOdooDateTime(fromDate!),
-                                'date_end': toOdooDateTime(toDate!),
-                                'website_menu': websiteSubMenu,
-                                'booth_menu': boothRegister,
-                                'website_track': showcaseTrack,
-                                'website_track_proposal': allowTrackProposal,
-                                'exhibitor_menu': showcaseExhibitory,
-                                'seats_limited': limitRegistration,
-                                'seats_max': seatLimit.text,
-                                'website_visibility':
-                                    visibilityTypes[selectedLabel],
-                                'event_url': onlineUrl.text,
-                                if (selectedWebsite != null)
-                                  'website_id': selectedWebsite!.id,
-                                'image_1024': fileBytes != null
-                                    ? base64Encode(fileBytes!)
-                                    : false,
-                                'event_type_id': selectedTemplate != null
-                                    ? selectedTemplate!.id
-                                    : false,
-                              };
-                              final provider =
-                                  Provider.of<EventDetailedProvider>(
-                                    context,
-                                    listen: false,
-                                  );
-
-                              final payloadFiltered = await provider
-                                  .buildSafePayload(payload);
-
-                              final id = await service.createEvent(
-                                vals: payloadFiltered,
-                              );
-
-                              if (id != null) {
-                                await provider.fetchEventDetails(id);
-                                tz.initializeTimeZones();
-                                var location = tz.getLocation(
-                                  provider.eventModel!.timezone,
-                                );
-
-                                final utcStart = provider.eventModel!.start
-                                    .toUtc();
-                                final utcEnd = provider.eventModel!.end.toUtc();
-
-                                final from = tz.TZDateTime.from(
-                                  utcStart,
-                                  location,
-                                );
-                                final to = tz.TZDateTime.from(utcEnd, location);
-
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => CalendarScreen(
-                                      eventId: provider.eventModel!.id,
-                                      fromDate: from,
-                                      toDate: to,
-                                    ),
-                                  ),
-                                );
-                              } else {
-                                hideLoadingDialog(context);
-                                CustomSnackbar.showError(
-                                  context,
-                                  "Some server Issue please check your server",
-                                );
-                              }
-                            } catch (e) {
-                              hideLoadingDialog(context);
-                              CustomSnackbar.showError(
-                                context,
-                                cleanedError(e.toString()),
-                              );
-                            }
-                          } else {
-                            CustomSnackbar.showWarning(
-                              context,
-                              "Please ensure all required fields are filled.",
-                            );
-                          }
-                        }
-                      },
-                      child: Container(
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: fillColor,
-                          borderRadius: BorderRadius.circular(10),
+                  if (provider.eventFields.containsKey('is_multi_slots')) ...[
+                    // The toggle and its "+ Create Slots" are one group, so
+                    // the form's 10px gap doesn't open between them: the
+                    // button sits right under the row, as "+ Create Question"
+                    // does under the question picker's options.
+                    FormToggleGroup(
+                      children: [
+                        _check(
+                          "Multiple Slot",
+                          multipleSlot,
+                          (v) => setState(() => multipleSlot = v),
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Text("$slot slots are available"),
-                        ),
-                      ),
+                        if (multipleSlot)
+                          CreateSlotsButton(
+                            isLoading: _creatingForSlots,
+                            onPressed: _createEventForSlots,
+                          ),
+                      ],
                     ),
                   ],
-                ],
 
-                _check("Limit registration", limitRegistration, (v) {
-                  setState(() {
-                    limitRegistration = v;
-                  });
-                }),
+                  _check("Limit registration", limitRegistration, (v) {
+                    setState(() {
+                      limitRegistration = v;
+                    });
+                  }),
 
-                if (limitRegistration) ...[
-                  const SizedBox(height: 8),
-                  _label("Registration Limit"),
-                  Field(
-                    controller: seatLimit,
-                    hint: "Enter maximum seats",
-                    keyboard: TextInputType.number,
-                  ),
-                ],
-              ]),
+                  if (limitRegistration) ...[
+                    _label("Registration Limit"),
+                    Field(
+                      controller: seatLimit,
+                      hint: "Enter maximum seats",
+                      keyboard: TextInputType.number,
+                    ),
+                  ],
+                ]),
 
-              _card("Event Organisation", [
-                _label("Organizer"),
-                TypeAheadField<FetchModel>(
-                  controller: eventOrganiserController,
-                  debounceDuration: const Duration(milliseconds: 300),
-
-                  suggestionsCallback: (value) async {
-                    return service.getTypeHeadSearchList(
-                      model: "res.partner",
-                      search: value,
+                _card("Event Organisation", [
+                  _label("Organizer"),
+                  MoboSingleSelectField<FetchModel>(
+                    selected: selectedOrganiser,
+                    selectedLabel: selectedOrganiser?.name,
+                    hintText: 'Select organizer',
+                    panelTitle: 'Select Organizer',
+                    search: (q) => _searchOptions(
+                      "res.partner",
+                      q,
                       domain: [
                         '|',
                         ['company_id', '=', false],
                         ['company_id', 'parent_of', ''],
                       ],
-                    );
-                  },
-                  emptyBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    padding: const EdgeInsets.all(12),
-                    child: Center(child: const Text("No organisation found")),
+                    ),
+                    onChanged: (m) => setState(() => selectedOrganiser = m),
                   ),
-                  loadingBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-
-                  itemBuilder: (context, s) => Container(
-                    color: Colors.white,
-                    child: ListTile(title: Text(s.name!)),
-                  ),
-                  onSelected: (value) {
-                    eventOrganiserController.text = value.name!;
-                    selectedOrganiser = value;
-                  },
-                  builder: (context, controller, focusNode) {
-                    return Field(
-                      controller: controller,
-                      focusNode: focusNode,
-                      readOnly: selectedOrganiser != null,
-                      hint: "Search organisation",
-                      suffixIcon: selectedOrganiser != null
-                          ? IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () {
-                                setState(() {
-                                  eventOrganiserController.clear();
-                                  selectedOrganiser = null;
-                                });
-                              },
-                            )
-                          : null,
-                    );
-                  },
-                ),
-                _label("Responsible"),
-                TypeAheadField<FetchModel>(
-                  controller: eventResponsibleController,
-                  debounceDuration: const Duration(milliseconds: 300),
-                  suggestionsCallback: (value) async {
-                    return service.getTypeHeadSearchList(
-                      model: "res.users",
-                      search: value,
+                  _label("Responsible"),
+                  MoboSingleSelectField<FetchModel>(
+                    selected: responsible,
+                    selectedLabel: responsible?.name,
+                    hintText: 'Select responsible',
+                    panelTitle: 'Select Responsible',
+                    search: (q) => _searchOptions(
+                      "res.users",
+                      q,
                       domain: [
                         ['share', '=', false],
                       ],
-                    );
-                  },
-                  emptyBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    padding: const EdgeInsets.all(12),
-                    child: Center(child: const Text("No person found")),
-                  ),
-                  loadingBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    child: Center(child: CircularProgressIndicator()),
+                    ),
+                    onChanged: (m) => setState(() => responsible = m),
                   ),
 
-                  itemBuilder: (context, s) => Container(
-                    color: Colors.white,
-                    child: ListTile(title: Text(s.name!)),
-                  ),
-
-                  onSelected: (value) {
-                    eventResponsibleController.text = value.name!;
-                    responsible = value;
-                  },
-
-                  builder: (context, controller, focusNode) {
-                    return Field(
-                      controller: controller,
-                      focusNode: focusNode,
-                      readOnly: responsible != null,
-                      hint: "Search Responsible person",
-                      suffixIcon: responsible != null
-                          ? IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () {
-                                setState(() {
-                                  eventResponsibleController.clear();
-                                  responsible = null;
-                                });
-                              },
-                            )
-                          : null,
-                    );
-                  },
-                ),
-
-                _label("Location"),
-                TypeAheadField<FetchModel>(
-                  controller: location,
-                  debounceDuration: const Duration(milliseconds: 300),
-                  suggestionsCallback: (value) async {
-                    return service.getTypeHeadSearchList(
-                      model: "res.partner",
-                      search: value,
+                  _label("Location"),
+                  MoboSingleSelectField<FetchModel>(
+                    selected: selectedLocation,
+                    selectedLabel: selectedLocation?.name,
+                    hintText: 'Select location',
+                    panelTitle: 'Select Location',
+                    search: (q) => _searchOptions(
+                      "res.partner",
+                      q,
                       domain: [
                         '|',
                         ['company_id', '=', false],
                         ['company_id', 'parent_of', ''],
                       ],
-                    );
-                  },
-                  emptyBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    padding: const EdgeInsets.all(12),
-                    child: Center(child: const Text("No location found")),
-                  ),
-                  loadingBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    child: Center(child: CircularProgressIndicator()),
+                    ),
+                    onChanged: (m) => setState(() => selectedLocation = m),
                   ),
 
-                  itemBuilder: (context, s) => Container(
-                    color: Colors.white,
-                    child: ListTile(title: Text(s.name!)),
+                  _label("Company"),
+                  MoboSingleSelectField<FetchModel>(
+                    selected: selectedCompany,
+                    selectedLabel: selectedCompany?.name,
+                    // An event without a company is visible to all of them.
+                    hintText: 'Visible to all',
+                    panelTitle: 'Select Company',
+                    search: (q) => _searchOptions("res.company", q),
+                    onChanged: (m) => setState(() => selectedCompany = m),
                   ),
 
-                  onSelected: (value) {
-                    location.text = value.name!;
-                    selectedLocation = value;
-                  },
-
-                  builder: (context, controller, focusNode) {
-                    return Field(
-                      controller: controller,
-                      focusNode: focusNode,
-                      readOnly: selectedLocation != null,
-                      hint: "Search Location",
-                      suffixIcon: selectedLocation != null
-                          ? IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () {
-                                setState(() {
-                                  location.clear();
-                                  selectedLocation = null;
-                                });
-                              },
-                            )
-                          : null,
-                    );
-                  },
-                ),
-
-                _label("Company"),
-                TypeAheadField<FetchModel>(
-                  controller: company,
-                  debounceDuration: const Duration(milliseconds: 300),
-                  suggestionsCallback: (value) async {
-                    return service.getTypeHeadSearchList(
-                      model: "res.company",
-                      search: value,
-                    );
-                  },
-                  emptyBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    padding: const EdgeInsets.all(12),
-                    child: Center(child: const Text("No Company found")),
-                  ),
-                  loadingBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-
-                  itemBuilder: (context, s) => Container(
-                    color: Colors.white,
-                    child: ListTile(title: Text(s.name!)),
-                  ),
-
-                  onSelected: (value) {
-                    company.text = value.name!;
-                    selectedCompany = value;
-                  },
-
-                  builder: (context, controller, focusNode) {
-                    return Field(
-                      controller: controller,
-                      focusNode: focusNode,
-                      hint: "Visible to all",
-                      readOnly: selectedCompany != null,
-                      suffixIcon: selectedCompany != null
-                          ? IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () {
-                                setState(() {
-                                  company.clear();
-                                  selectedCompany = null;
-                                });
-                              },
-                            )
-                          : null,
-                    );
-                  },
-                ),
-              ]),
-              _card("Template", [
-                _label("Event Template"),
-                TypeAheadField<FetchModel>(
-                  controller: template,
-                  debounceDuration: const Duration(milliseconds: 300),
-                  suggestionsCallback: (value) async {
-                    return service.getTypeHeadSearchList(
-                      model: "event.type",
-                      search: value,
-                    );
-                  },
-                  emptyBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    padding: const EdgeInsets.all(12),
-                    child: Center(child: const Text("No Template found")),
-                  ),
-                  loadingBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-
-                  itemBuilder: (context, s) => Container(
-                    color: Colors.white,
-                    child: ListTile(title: Text(s.name!)),
-                  ),
-
-                  onSelected: (value) async {
-                    template.text = value.name!;
-                    selectedTemplate = value;
-
-                    try {
-                      templateLoading = true;
-
-                      final result = await service.eventTemplate(
-                        selectedTemplate!.id,
-                      );
-
-                      setState(() {
-                        websiteSubMenu = result.websiteMenu;
-                        boothRegister = result.boothMenu;
-                        showcaseTrack = result.websiteTrack;
-                        allowTrackProposal = result.websiteTrackProposal;
-                        showcaseExhibitory = result.exhibitorMenu;
-                        limitRegistration = result.hasSeatsLimitation;
-                        seatLimit.text = result.seatsMax.toString();
-                        templateLoading = false;
-                      });
-                    } catch (e) {
-                      setState(() {
-                        templateLoading = false;
-                      });
-                      final message = cleanedError(e.toString());
-                      CustomSnackbar.showError(context, message);
-                    }
-                  },
-
-                  builder: (context, controller, focusNode) {
-                    return Field(
-                      controller: controller,
-                      focusNode: focusNode,
-                      readOnly: selectedTemplate != null,
-                      hint: "Select your template",
-                      suffixIcon: selectedTemplate != null
-                          ? IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () {
-                                setState(() {
-                                  template.clear();
-                                  selectedTemplate = null;
-                                });
-                              },
-                            )
-                          : null,
-                    );
-                  },
-                ),
-              ]),
-
-              _card("Website Information", [
-                if (provider.eventFields.containsKey('website_menu')) ...[
-                  _check("Website Sub menu", websiteSubMenu, (v) {
-                    setState(() {
-                      websiteSubMenu = v;
-
-                      boothRegister = v;
-                      showcaseTrack = v;
-                      allowTrackProposal = v;
-                      showcaseExhibitory = v;
-                    });
-                  }),
-                ],
-
-                if (provider.eventFields.containsKey('booth_menu')) ...[
-                  _check(
-                    "Booth register",
-                    boothRegister,
-                    (v) => setState(() => boothRegister = v),
-                  ),
-                ],
-
-                if (provider.eventFields.containsKey('website_track')) ...[
-                  _check("Show case Track", showcaseTrack, (v) {
-                    setState(() {
-                      showcaseTrack = v;
-                      allowTrackProposal = v;
-                    });
-                  }),
-                ],
-
-                if (provider.eventFields.containsKey(
-                  'website_track_proposal',
-                )) ...[
-                  _check(
-                    "Allow track proposal",
-                    allowTrackProposal,
-                    (v) => setState(() => allowTrackProposal = v),
-                  ),
-                ],
-
-                if (provider.eventFields.containsKey('exhibitor_menu')) ...[
-                  _check(
-                    "Show case Exhibitory",
-                    showcaseExhibitory,
-                    (v) => setState(() => showcaseExhibitory = v),
-                  ),
-                ],
-
-                _label("Website"),
-                TypeAheadField<FetchModel>(
-                  controller: website,
-                  debounceDuration: const Duration(milliseconds: 300),
-                  emptyBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    padding: const EdgeInsets.all(12),
-                    child: Center(child: const Text("No Website  found")),
-                  ),
-                  loadingBuilder: (context) => Container(
-                    width: double.infinity,
-                    height: 100,
-                    color: Colors.white,
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-                  suggestionsCallback: (value) async {
-                    if (selectedCompany == null) {
-                      return [];
-                    }
-
-                    final id = selectedCompany!.id;
-
-                    return service.getTypeHeadSearchList(
-                      model: "website",
-                      search: value,
-                      domain: [
-                        '|',
-                        ['company_id', '=', false],
-                        ['company_id', '=', id],
+                  // The event's kanban column. A short fixed list, so it opens
+                  // as a plain list; an event always has a stage, so it can't
+                  // be cleared.
+                  if (provider.eventFields.containsKey('stage_id')) ...[
+                    _label("Stage"),
+                    MoboSingleSelectField<FetchModel>(
+                      selected: selectedStage,
+                      selectedLabel: selectedStage?.name,
+                      hintText: 'Select stage',
+                      panelTitle: 'Select Stage',
+                      allowClear: false,
+                      options: [
+                        for (final stage
+                            in context.watch<HomeProvider>().orderedStages)
+                          MoboSelectOption(
+                            value: FetchModel(id: stage.id, name: stage.name),
+                            label: stage.name,
+                          ),
                       ],
-                    );
-                  },
-
-                  itemBuilder: (context, s) => Container(
-                    color: Colors.white,
-                    child: ListTile(title: Text(s.name!)),
-                  ),
-
-                  onSelected: (value) {
-                    website.text = value.name!;
-                    selectedWebsite = value;
-                  },
-
-                  builder: (context, controller, focusNode) {
-                    return Field(
-                      controller: controller,
-                      focusNode: focusNode,
-                      hint: "Select your website",
-                      readOnly: selectedWebsite != null,
-                      suffixIcon: selectedWebsite != null
-                          ? IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () {
-                                setState(() {
-                                  website.clear();
-                                  selectedWebsite = null;
-                                });
-                              },
-                            )
-                          : null,
-                    );
-                  },
-                ),
-              ]),
-              _card("Event Tags", [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: selectedTags.map((tag) {
-                    return Chip(
-                      label: Text(tag.name!),
-                      deleteIcon: const Icon(Icons.close),
-                      onDeleted: () {
-                        setState(() {
-                          selectedTags.remove(tag);
-                        });
-                        suggestionsController.refresh();
-                      },
-                    );
-                  }).toList(),
-                ),
-                TypeAheadField<FetchModel>(
-                  controller: tags,
-                  focusNode: tagFocusNode,
-                  suggestionsController: suggestionsController,
-                  constraints: const BoxConstraints(maxHeight: 200),
-
-                  decorationBuilder: (context, child) {
-                    return Material(
-                      elevation: 1,
-                      color: Colors.white,
-                      child: child,
-                    );
-                  },
-
-                  suggestionsCallback: (value) async {
-                    return service.getTypeHeadSearchTagList(
-                      model: "event.tag",
-                      search: value.trim(),
-                      domain: selectedTags.isNotEmpty
-                          ? [
-                              [
-                                'id',
-                                'not in',
-                                selectedTags.map((s) => s.id).toList(),
-                              ],
-                            ]
-                          : [],
-                    );
-                  },
-
-                  onSelected: (suggestion) {
-                    setState(() {
-                      selectedTags.add(suggestion);
-                    });
-                    tags.clear();
-                    suggestionsController.refresh();
-                    tagFocusNode.requestFocus();
-                  },
-                  listBuilder: (context, children) {
-                    return Scrollbar(
-                      thickness: 3,
-                      radius: const Radius.circular(6),
-                      thumbVisibility: true,
-                      child: ListView(
-                        shrinkWrap: true,
-                        padding: EdgeInsets.zero,
-                        children: children,
-                      ),
-                    );
-                  },
-
-                  itemBuilder: (context, suggestion) {
-                    return ListTile(
-                      dense: true,
-                      title: Text(suggestion.name ?? ""),
-                    );
-                  },
-
-                  emptyBuilder: (context) => Material(
-                    color: Colors.white,
-                    child: const SizedBox(
-                      height: 80,
-                      child: Center(child: Text("No tags found")),
+                      onChanged: (m) => setState(() => selectedStage = m),
                     ),
-                  ),
-
-                  loadingBuilder: (context) => Material(
-                    color: Colors.white,
-                    child: const SizedBox(
-                      height: 80,
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                  ),
-
-                  builder: (context, controller, focusNode) {
-                    return Field(
-                      controller: controller,
-                      focusNode: focusNode,
-                      hint: "Culture, music, tech...",
-                    );
-                  },
-                ),
-              ]),
-              _card("Links", [
-                _label("Visibility"),
-                DropdownButtonFormField<String>(
-                  dropdownColor: Colors.white,
-                  isExpanded: true,
-                  value: visibilityTypes.containsKey(selectedLabel)
-                      ? selectedLabel
-                      : visibilityTypes.keys.first,
-                  decoration: InputDecoration(
-                    hintText: "Select visibility",
-                    hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
-                    isDense: true,
-                    filled: true,
-                    fillColor: Color(0xFFF1F3F5),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  items: visibilityTypes.keys.map((label) {
-                    return DropdownMenuItem(
-                      value: label,
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (v) {
-                    setState(() {
-                      selectedLabel = v!;
-                    });
-                  },
-                ),
-                if (selectedLocation == null &&
-                    location.text.trim().isEmpty) ...[
-                  _label("Online Event Url"),
-                  Field(
-                    controller: onlineUrl,
-                    hint: "https://",
-                    keyboard: TextInputType.url,
-                  ),
-                ],
-              ]),
-              Container(
-                padding: EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black12, blurRadius: 6),
                   ],
+
+                  if (provider.eventFields.containsKey('kanban_state')) ...[
+                    _label("Status"),
+                    EventStatusField(
+                      value: kanbanState,
+                      onChanged: (v) => setState(() => kanbanState = v),
+                    ),
+                  ],
+                ]),
+                _card("Template", [
+                  _label("Event Template"),
+                  MoboSingleSelectField<FetchModel>(
+                    selected: selectedTemplate,
+                    selectedLabel: selectedTemplate?.name,
+                    hintText: 'Select template',
+                    panelTitle: 'Select Template',
+                    search: (q) => _searchOptions("event.type", q),
+                    onChanged: (value) async {
+                      // Clearing drops the template only; the defaults it
+                      // filled in stay, as before.
+                      if (value == null) {
+                        setState(() => selectedTemplate = null);
+                        return;
+                      }
+                      setState(() => selectedTemplate = value);
+
+                      try {
+                        templateLoading = true;
+
+                        final result = await service.eventTemplate(
+                          selectedTemplate!.id,
+                        );
+
+                        setState(() {
+                          websiteSubMenu = result.websiteMenu;
+                          boothRegister = result.boothMenu;
+                          showcaseTrack = result.websiteTrack;
+                          allowTrackProposal = result.websiteTrackProposal;
+                          showcaseExhibitory = result.exhibitorMenu;
+                          limitRegistration = result.hasSeatsLimitation;
+                          seatLimit.text = result.seatsMax.toString();
+                          templateLoading = false;
+                        });
+                      } catch (e) {
+                        setState(() {
+                          templateLoading = false;
+                        });
+                        final message = cleanedError(e.toString());
+                        CustomSnackbar.showError(context, message);
+                      }
+                    },
+                  ),
+                ]),
+
+                _card("Website Information", [
+                  if (provider.eventFields.containsKey('website_menu')) ...[
+                    _check("Website Sub menu", websiteSubMenu, (v) {
+                      setState(() {
+                        websiteSubMenu = v;
+
+                        boothRegister = v;
+                        showcaseTrack = v;
+                        allowTrackProposal = v;
+                        showcaseExhibitory = v;
+                      });
+                    }),
+                  ],
+
+                  if (provider.eventFields.containsKey('booth_menu')) ...[
+                    _check(
+                      "Booth register",
+                      boothRegister,
+                      (v) => setState(() => boothRegister = v),
+                    ),
+                  ],
+
+                  if (provider.eventFields.containsKey('website_track')) ...[
+                    _check("Show case Track", showcaseTrack, (v) {
+                      setState(() {
+                        showcaseTrack = v;
+                        allowTrackProposal = v;
+                      });
+                    }),
+                  ],
+
+                  if (provider.eventFields.containsKey(
+                    'website_track_proposal',
+                  )) ...[
+                    _check(
+                      "Allow track proposal",
+                      allowTrackProposal,
+                      (v) => setState(() => allowTrackProposal = v),
+                    ),
+                  ],
+
+                  if (provider.eventFields.containsKey('exhibitor_menu')) ...[
+                    _check(
+                      "Show case Exhibitory",
+                      showcaseExhibitory,
+                      (v) => setState(() => showcaseExhibitory = v),
+                    ),
+                  ],
+
+                  _label("Website"),
+                  MoboSingleSelectField<FetchModel>(
+                    selected: selectedWebsite,
+                    selectedLabel: selectedWebsite?.name,
+                    hintText: 'Select website',
+                    panelTitle: 'Select Website',
+                    // Websites are listed per company, so one is needed first.
+                    // Still enabled while a website is set, so one left over
+                    // from a cleared company can be cleared too.
+                    enabled: selectedCompany != null || selectedWebsite != null,
+                    search: (q) async {
+                      final companyId = selectedCompany?.id;
+                      if (companyId == null) return [];
+                      return _searchOptions(
+                        "website",
+                        q,
+                        domain: [
+                          '|',
+                          ['company_id', '=', false],
+                          ['company_id', '=', companyId],
+                        ],
+                      );
+                    },
+                    onChanged: (m) => setState(() => selectedWebsite = m),
+                  ),
+
+                  if (provider.eventFields.containsKey('website_published'))
+                    PublishedToggle(
+                      value: websitePublished,
+                      onChanged: (v) => setState(() => websitePublished = v),
+                    ),
+                ]),
+                _card("Event Tags", [
+                  MoboMultiSelectField<FetchModel>(
+                    // The chosen tags always show, even before (or without)
+                    // the full list.
+                    options: {...allTags, ...selectedTags}
+                        .map(
+                          (t) =>
+                              MoboSelectOption(value: t, label: t.name ?? ''),
+                        )
+                        .toList(),
+                    selected: selectedTags,
+                    onChanged: (tags) => setState(() => selectedTags = tags),
+                    hintText: 'Select tags',
+                    panelTitle: 'Select Tags',
+                  ),
+                ]),
+                _card("Links", [
+                  _label("Visibility"),
+                  MoboSingleSelectField<String>(
+                    selected: selectedLabel,
+                    options: visibilityTypes.keys
+                        .map(
+                          (label) =>
+                              MoboSelectOption(value: label, label: label),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) setState(() => selectedLabel = v);
+                    },
+                    allowClear: false,
+                    hintText: 'Select visibility',
+                  ),
+                  if (selectedLocation == null) ...[
+                    _label("Online Event Url"),
+                    Field(
+                      controller: onlineUrl,
+                      hint: "https://",
+                      keyboard: TextInputType.url,
+                    ),
+                  ],
+                ]),
+                Container(
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface(isDark),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: const [AppShadows.cardShadow],
+                  ),
+                  // Nothing staged: no fixed height, so the panel is as tall as
+                  // the header and the empty state and leaves no slack under
+                  // the "Add Ticket" button (a fixed 300 clipped it, a fixed
+                  // 400 left a gap). Once tickets are staged the list scrolls
+                  // inside a 400 panel.
+                  height: provider.dummyTicketList.isEmpty ? null : 400,
+                  child: TicketLineWidget(eventId: 2, dummyTicket: true),
                 ),
-                height: 300,
-                child: TicketLineWidget(eventId: 2, dummyTicket: true),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
+              ],
+            ),
+          ),
+        );
+
+        // The fields scroll; the submit button stays pinned below them (and
+        // above the keyboard when it is open), so it never scrolls out of
+        // reach. Only when the window is left too short for even that — a
+        // phone on its side with the keyboard up — does the button scroll
+        // along with the fields (PinnedFooterLayout).
+        return PinnedFooterLayout(
+          expandBody: true,
+          scrollAllBelow: 200,
+          body: fields,
+          footer: PinnedActionBar(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              compact ? 8 : 12,
+              20,
+              compact ? 8 : 16,
+            ),
+            child: ConstrainedContent(
+              maxWidth: maxWidth,
+              // §5 — a fixed 48 (a touch less on a short window), as billing's
+              // Create Invoice button, rather than padding that made it ~56.
+              child: SizedBox(
                 width: double.infinity,
+                height: compact ? 44 : 48,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isFormValid
-                        ? primaryColor
-                        : Colors.grey.shade400,
+                    backgroundColor: primaryColor,
+                    disabledBackgroundColor: AppTheme.disabledButtonFillOn(isDark),
+                    disabledForegroundColor: AppTheme.disabledButtonText,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    padding: EdgeInsets.zero,
                   ),
-                  onPressed: isFormValid
+                  onPressed: isFormValid && !_creatingForSlots
                       ? () async {
+                          final error = _validationError();
+                          if (error != null) {
+                            CustomSnackbar.showWarning(context, error);
+                            return;
+                          }
                           try {
                             loadingDialog(
                               context,
-                              "Creating  Event",
-                              "Please wait while we Creating  Event",
+                              "Creating Event",
+                              "Please wait while we create the event",
                               LoadingAnimationWidget.fourRotatingDots(
                                 color: primaryColor,
                                 size: 30,
                               ),
                             );
 
-                            final provider = Provider.of<EventDetailedProvider>(
-                              context,
-                              listen: false,
-                            );
-                            Map<String, dynamic> payload = {
-                              'name': eventNameController.text.trim(),
-                              'organizer_id': selectedOrganiser?.id ?? false,
-                              'user_id': responsible?.id ?? false,
-                              'address_id': selectedLocation?.id ?? false,
-                              'company_id': selectedCompany?.id ?? false,
-                              'tag_ids': [
-                                [6, 0, selectedTags.map((e) => e.id).toList()],
-                              ],
-                              if (provider.dummyTicketList.isNotEmpty)
-                                'event_ticket_ids': provider
-                                    .buildEventTicketCommands(
-                                      provider.dummyTicketList,
-                                    ),
-
-                              'is_multi_slots': multipleSlot,
-                              'date_tz': selectedTimezone ?? false,
-                              'date_begin': toOdooDateTime(fromDate!),
-                              'date_end': toOdooDateTime(toDate!),
-                              'website_menu': websiteSubMenu,
-                              'booth_menu': boothRegister,
-                              'website_track': showcaseTrack,
-                              'website_track_proposal': allowTrackProposal,
-                              'exhibitor_menu': showcaseExhibitory,
-                              'seats_limited': limitRegistration,
-                              'seats_max': seatLimit.text,
-                              'website_visibility':
-                                  visibilityTypes[selectedLabel],
-                              'event_url': onlineUrl.text,
-                              'event_type_id': selectedTemplate?.id ?? false,
-                              if (selectedWebsite != null)
-                                'website_id': selectedWebsite!.id,
-
-                              'image_1024': fileBytes != null
-                                  ? base64Encode(fileBytes!)
-                                  : false,
-                            };
+                            final provider =
+                                Provider.of<EventDetailedProvider>(
+                                  context,
+                                  listen: false,
+                                );
+                            final payload = _buildPayload(provider);
 
                             final payloadFiltered = await provider
                                 .buildSafePayload(payload);
@@ -1211,7 +1069,7 @@ class _CreateFormState extends State<CreateForm> {
                             hideLoadingDialog(context);
                             CustomSnackbar.showSuccess(
                               context,
-                              " Successfully Created Event",
+                              "Successfully Created Event",
                             );
                             ReviewService().trackSignificantEvent();
                             Navigator.pushAndRemoveUntil(
@@ -1229,57 +1087,65 @@ class _CreateFormState extends State<CreateForm> {
                             );
                           }
                         }
-                      : () {},
-                  child: Text(
-                    "Create Event",
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                      : null,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      HugeIcon(
+                        icon: HugeIcons.strokeRoundedCalendarAdd01,
+                        color: isFormValid
+                            ? Colors.white
+                            : AppTheme.disabledButtonText,
+                        size: 25,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        "Create Event",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              SizedBox(height: 20),
-            ],
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _label(String t) =>
-      Text(t, style: const TextStyle(color: Colors.grey));
+  /// §6 — field label: 14/w500 grey, matching mobo_fleet's form-field labels.
+  /// §6 — field label. `isRequired` appends a red bold " *" via [FieldLabel]
+  /// instead of baking the asterisk into the string (it needs its own colour).
+  Widget _label(String t, {bool isRequired = false}) =>
+      FieldLabel(t, isRequired: isRequired, bottomGap: AppTheme.labelGap);
 
-  Widget _card(String h, List<Widget> c) => Container(
-    margin: const EdgeInsets.only(bottom: 20),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(15),
-          child: Text(
-            h,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
+  /// Form-section card — mirrors mobo_fleet's `vehicleInfoCard`: title,
+  /// divider, padded children, radius 12, hairline border + card shadow.
+  Widget _card(String h, List<Widget> c) => Builder(
+    builder: (context) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return Container(
+        // 16 between cards, and 16 of padding inside them (see formCardBody):
+        // the rhythm of mobo Billing's create-invoice form.
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: AppTheme.surface(isDark),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: AppTheme.cardBorder(isDark), width: 0.5),
+          boxShadow: AppShadows.card,
         ),
-        Divider(color: Colors.grey.shade300),
-        Padding(
-          padding: const EdgeInsets.all(15),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: c
-                .map(
-                  (e) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: e,
-                  ),
-                )
-                .toList(),
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            formCardHeader(h, isDark),
+            formCardBody(c),
+          ],
         ),
-      ],
-    ),
+      );
+    },
   );
 }

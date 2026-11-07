@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../core/theme/app_theme.dart';
 
 class FullImageScreen extends StatefulWidget {
   final Uint8List imageBytes;
@@ -88,43 +89,51 @@ class _FullImageScreenState extends State<FullImageScreen> {
         leading: IconButton(
           onPressed: () => Navigator.pop(context),
           icon: HugeIcon(
-            icon:
-            HugeIcons.strokeRoundedArrowLeft01,
+            icon: HugeIcons.strokeRoundedArrowLeft01,
             color: isDark ? Colors.white : Colors.black,
           ),
         ),
         backgroundColor: isDark ? Colors.grey[900] : Colors.grey[50],
-        foregroundColor: isDark ? Colors.white : Theme.of(context).primaryColor,
+        foregroundColor: Theme.of(context).primaryColor,
         elevation: 0,
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) => Stack(
-          children: [
-            GestureDetector(
-              onDoubleTapDown: (details) => _doubleTapDetails = details,
-              onDoubleTap: _handleDoubleTap,
-              child: SizedBox.expand(
-                child: InteractiveViewer(
-                  transformationController: _transformationController,
-                  minScale: 1.0,
-                  maxScale: 5.0,
-                  boundaryMargin: EdgeInsets.zero,
-                  constrained: true,
-                  child: Image.memory(
-                    widget.imageBytes,
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) => Center(
-                      child: Icon(
-                        Icons.error,
-                        color: isDark ? Colors.red[300] : Colors.red,
-                        size: 48,
+      // Left and right only: on a phone in landscape a notch or the gesture
+      // area down one side would otherwise sit over the edge of the picture.
+      // (Both are zero in portrait, so nothing changes there.)
+      body: SafeArea(
+        top: false,
+        bottom: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) => Stack(
+            children: [
+              GestureDetector(
+                onDoubleTapDown: (details) => _doubleTapDetails = details,
+                onDoubleTap: _handleDoubleTap,
+                child: SizedBox.expand(
+                  child: InteractiveViewer(
+                    transformationController: _transformationController,
+                    minScale: 1.0,
+                    maxScale: 5.0,
+                    boundaryMargin: EdgeInsets.zero,
+                    constrained: true,
+                    child: Image.memory(
+                      widget.imageBytes,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Center(
+                        child: Icon(
+                          Icons.error,
+                          color: isDark
+                              ? StatusColors.errorIcon
+                              : StatusColors.red,
+                          size: 48,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
