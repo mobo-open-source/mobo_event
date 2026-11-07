@@ -49,3 +49,9 @@ CLAUDE.md
 
 # Local VS Code workspace files
 *.code-workspace
+
+# Signing keys and credentials (never commit)
+key.properties
+*.keystore
+*.jks
+*.pem
