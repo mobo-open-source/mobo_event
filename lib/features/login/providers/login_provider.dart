@@ -5,14 +5,38 @@ import 'package:flutter/material.dart';
 import 'package:odoo_rpc/odoo_rpc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/exceptions/app_exceptions.dart';
+import '../../../core/services/database_service.dart';
+import '../../../core/services/event_access_gate.dart';
+import '../../../core/services/event_module_gate.dart';
 import '../../../core/services/odoo_session_manager.dart';
 import '../../../core/services/session_service.dart';
+import '../../../core/utils/database_expiry.dart';
 
 enum LoginResult {
   success,
   twoFactorRequired,
   invalidCredentials,
   networkError,
+
+  /// Credentials were correct, but the account is a portal (share) user.
+  /// Kept distinct from [invalidCredentials] so the screen can explain *why*
+  /// rather than implying the password was wrong.
+  portalUser,
+
+  /// Credentials were correct, but the database's subscription has expired.
+  /// Nothing was kept — the check runs before anything is saved or cached.
+  databaseExpired,
+
+  /// Credentials were correct, but the server has no Event module. Nothing
+  /// was kept: whichever session was active before this attempt (if any) has
+  /// already been restored.
+  moduleMissing,
+
+  /// Credentials were correct and the Event module is there, but the account
+  /// holds no Event role, so the server refuses it `event.event`. Nothing was
+  /// kept, and the previous session (if any) has been restored.
+  noEventAccess,
 }
 
 class LoginProvider with ChangeNotifier {
@@ -25,12 +49,12 @@ class LoginProvider with ChangeNotifier {
   bool isLoadingDatabases = false;
   List<String> dropdownItems = [];
   OdooClient? client;
+  final DatabaseService _databaseService = DatabaseService();
   bool obscurePassword = true;
   List<String> _previousUrls = [];
   List<String> get previousUrls => _previousUrls;
+  /// Maps server URL to last used database.
   final Map<String, String> _serverDatabaseMap = {};
-
-  /// Maps server URL to last used database
   bool _disposed = false;
   String _selectedProtocol = 'https://';
   String get selectedProtocol => _selectedProtocol;
@@ -52,14 +76,13 @@ class LoginProvider with ChangeNotifier {
       return _serverDatabaseMap[fullUrl];
     }
 
-    /// Try alternate protocol (http <-> https)
     String alt;
     if (fullUrl.startsWith('https://')) {
       alt = 'http://${fullUrl.substring(8)}';
     } else if (fullUrl.startsWith('http://')) {
       alt = 'https://${fullUrl.substring(7)}';
     } else {
-      /// If somehow no protocol, check both
+      // If somehow no protocol, check both
       alt = 'https://$fullUrl';
       if (_serverDatabaseMap.containsKey(alt)) return _serverDatabaseMap[alt];
       alt = 'http://$fullUrl';
@@ -70,7 +93,6 @@ class LoginProvider with ChangeNotifier {
       return _serverDatabaseMap[alt];
     }
 
-    /// Normalize trailing slash differences
     String stripSlash(String u) =>
         u.endsWith('/') ? u.substring(0, u.length - 1) : u;
     final noSlash = stripSlash(fullUrl);
@@ -104,6 +126,14 @@ class LoginProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Drives the submit button's loading state and locks the fields, for flows
+  /// that run outside [login] (adding an account) but should look identical.
+  void setBusy(bool busy) {
+    isLoading = busy;
+    disableFields = busy;
+    _safeNotifyListeners();
+  }
+
   void setProtocol(String protocol) {
     _selectedProtocol = protocol;
     notifyListeners();
@@ -116,12 +146,10 @@ class LoginProvider with ChangeNotifier {
       if (fullUrl.isEmpty) return;
       List<String> urls = prefs.getStringList('previous_server_urls') ?? [];
 
-      ///Normalize trailing slash
       String u = fullUrl.endsWith('/')
           ? fullUrl.substring(0, fullUrl.length - 1)
           : fullUrl;
 
-      /// Move to front if already exists
       urls.removeWhere((e) => e == u);
       urls.insert(0, u);
       if (urls.length > 10) {
@@ -138,18 +166,16 @@ class LoginProvider with ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      /// 1) Start with any explicitly saved history from previous logins
       final historyUrls = prefs.getStringList('previous_server_urls') ?? [];
 
-      /// We'll maintain insertion order and uniqueness
+      // We'll maintain insertion order and uniqueness
       final Set<String> orderedUnique = <String>{};
 
-      /// Helper to add if non-empty and normalized
       String _normalize(String url) {
         String u = url.trim();
         if (u.isEmpty) return u;
 
-        /// Ensure protocol prefix for consistency in display/saving
+        // Ensure protocol prefix for consistency in display/saving
         if (!u.startsWith('http://') && !u.startsWith('https://')) {
           u = '$_selectedProtocol$u';
         }
@@ -164,7 +190,7 @@ class LoginProvider with ChangeNotifier {
         orderedUnique.add(normalized);
       }
 
-      /// 2) Last used server info (persists across logout) - prefer to show first
+      // Last used server info (persists across logout) - prefer to show first
       try {
         final lastFromPrefs = prefs.getString('lastServerUrl');
         // If missing in prefs directly, also try through manager API
@@ -176,31 +202,29 @@ class LoginProvider with ChangeNotifier {
         }
       } catch (_) {}
 
-      /// 3) Add current session server (if any)
       try {
         final current = await OdooSessionManager.getCurrentSession();
         addUrl(current?.serverUrl);
       } catch (_) {}
 
-      /// 4) Add any stored account URLs from SessionService (initialized in AppEntry)
+      // Add any stored account URLs from SessionService (initialized in AppEntry)
       try {
         final accounts = SessionService.instance.storedAccounts;
         for (final acc in accounts) {
-          /// Try multiple possible keys to be robust
+          // Try multiple possible keys to be robust
           addUrl(acc['url']?.toString());
           addUrl(acc['serverUrl']?.toString());
         }
       } catch (_) {}
 
-      /// 5) Finally, append historyUrls (keeps their order, deduped by set)
+      // Finally, append historyUrls (keeps their order, deduped by set)
       for (final u in historyUrls) {
         addUrl(u);
       }
 
       _previousUrls = orderedUnique.toList();
 
-      /// Load server-database mappings
-      /// 4.a) Preferred: consolidated JSON map
+      // Preferred: consolidated JSON map
       try {
         final rawMap = prefs.getString('server_db_map');
         if (rawMap != null && rawMap.isNotEmpty) {
@@ -215,7 +239,7 @@ class LoginProvider with ChangeNotifier {
         }
       } catch (_) {}
 
-      /// 4.b) Backward-compat: scan individual keys if any
+      // Backward-compat: scan individual keys if any
       try {
         final mappingKeys = prefs.getKeys().where(
           (key) => key.startsWith('server_db_'),
@@ -223,7 +247,7 @@ class LoginProvider with ChangeNotifier {
         for (final key in mappingKeys) {
           final serverUrl = key.substring(10);
 
-          /// Remove 'server_db_' prefix
+          // Remove 'server_db_' prefix
           final dbName = prefs.getString(key);
           if (dbName != null) {
             _serverDatabaseMap[serverUrl] = dbName;
@@ -231,7 +255,7 @@ class LoginProvider with ChangeNotifier {
         }
       } catch (_) {}
 
-      /// Also seed mapping from lastServerUrl/lastDatabase if present
+      // Also seed mapping from lastServerUrl/lastDatabase if present
       final lastServer = prefs.getString('lastServerUrl');
       final lastDb = prefs.getString('lastDatabase');
       if ((lastServer != null && lastServer.isNotEmpty) &&
@@ -254,7 +278,7 @@ class LoginProvider with ChangeNotifier {
 
       _isInitialized = true;
       _safeNotifyListeners();
-    } catch (e) {
+    } catch (_) {
       _isInitialized = true;
       _safeNotifyListeners();
     }
@@ -265,7 +289,6 @@ class LoginProvider with ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final fullUrl = getFullUrl();
 
-      /// Save server URL to history
       List<String> urls = prefs.getStringList('previous_server_urls') ?? [];
       if (fullUrl.isNotEmpty && !urls.contains(fullUrl)) {
         urls.insert(0, fullUrl);
@@ -276,13 +299,12 @@ class LoginProvider with ChangeNotifier {
         _previousUrls = urls;
       }
 
-      /// Save server-database mapping
       if (fullUrl.isNotEmpty && database != null && database!.isNotEmpty) {
-        /// Backward-compat per-key storage
+        // Backward-compat per-key storage
         await prefs.setString('server_db_$fullUrl', database!);
         _serverDatabaseMap[fullUrl] = database!;
 
-        /// Consolidated JSON map for reliable retrieval
+        // Consolidated JSON map for reliable retrieval
         try {
           final existing = prefs.getString('server_db_map');
           final Map<String, dynamic> map =
@@ -293,7 +315,7 @@ class LoginProvider with ChangeNotifier {
           await prefs.setString('server_db_map', jsonEncode(map));
         } catch (_) {}
       }
-    } catch (e) {}
+    } catch (_) {}
   }
 
   String _normalizeUrl(String url) {
@@ -365,44 +387,27 @@ class LoginProvider with ChangeNotifier {
       return;
     }
 
-    /// Preserve the current selection while reloading
+    // Preserve the current selection while reloading
     final String? previousSelection = database;
 
     isLoadingDatabases = true;
     urlCheck = false;
     errorMessage = null;
 
-    /// Do not nullify the current database here; keep it until new list arrives
+    // Do not nullify the current database here; keep it until new list arrives
     dropdownItems.clear();
     _safeNotifyListeners();
 
     try {
       final baseUrl = _normalizeUrl(urlController.text);
 
-      final HttpClient httpClient = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 12)
-        ..idleTimeout = const Duration(seconds: 10)
-        ..maxConnectionsPerHost = 5
-        ..badCertificateCallback =
-            (X509Certificate cert, String host, int port) => true;
-      final request = await httpClient.postUrl(
-        Uri.parse('$baseUrl/web/database/list'),
-      );
+      // Bounds the whole request, not just the connect: a server that
+      // accepts the connection and then never answers would otherwise leave
+      // the dropdown spinning forever.
+      final dbList = await _databaseService
+          .fetchDatabaseList(baseUrl)
+          .timeout(const Duration(seconds: 15));
 
-      request.headers.set('Content-Type', 'application/json');
-      request.write(
-        jsonEncode({'jsonrpc': '2.0', 'method': 'call', 'params': {}, 'id': 1}),
-      );
-
-      final response = await request.close();
-      final responseBody = await response.transform(utf8.decoder).join();
-      httpClient.close();
-      final jsonResponse = jsonDecode(responseBody);
-      final resu = (jsonResponse['result'] as List)
-          .map((db) => db.toString())
-          .toList();
-
-      final dbList = resu as List<dynamic>;
       if (dbList.isEmpty) {
         errorMessage = 'No databases found on this server.';
         urlCheck = false;
@@ -412,7 +417,7 @@ class LoginProvider with ChangeNotifier {
         dropdownItems = uniqueDbList.map((e) => e.toString()).toList();
         urlCheck = true;
 
-        /// Persist the validated URL to history immediately so suggestions work before the first login
+        // Persist the validated URL to history immediately so suggestions work before the first login
         try {
           final prefs = await SharedPreferences.getInstance();
           final fullUrl = getFullUrl();
@@ -434,14 +439,14 @@ class LoginProvider with ChangeNotifier {
         final savedDatabase = _resolveSavedDatabaseForUrl(fullUrl);
 
         if (savedDatabase != null && dropdownItems.contains(savedDatabase)) {
-          /// Auto-select the previously used database for this server
+          // Auto-select the previously used database for this server
           database = savedDatabase;
         } else if (previousSelection != null &&
             dropdownItems.contains(previousSelection)) {
-          /// Restore previous selection if still available
+          // Restore previous selection if still available
           database = previousSelection;
         } else {
-          /// 2. Fallback: check lastServerUrl/lastDatabase from prefs via manager
+          // 2. Fallback: check lastServerUrl/lastDatabase from prefs via manager
           try {
             final lastUrl = await OdooSessionManager.getLastServerUrl();
             final lastDb = await OdooSessionManager.getLastDatabase();
@@ -457,7 +462,7 @@ class LoginProvider with ChangeNotifier {
               final A = normalize(a);
               final B = normalize(b);
 
-              /// Compare ignoring protocol
+              // Compare ignoring protocol
               String stripProto(String s) =>
                   s.replaceFirst(RegExp('^https?://'), '');
               return stripProto(A) == stripProto(B);
@@ -471,42 +476,114 @@ class LoginProvider with ChangeNotifier {
             }
           } catch (_) {}
 
-          /// 3. As a final fallback, default to first database
+          // 3. As a final fallback, default to first database
           if (database == null && uniqueDbList.isNotEmpty) {
             database = uniqueDbList.first.toString();
           }
         }
       }
+    } on HandshakeException catch (e) {
+      // An https:// URL pointed at a server that only speaks http fails here,
+      // so the message has to name the fix rather than blaming the database.
+      final msg = e.toString().toLowerCase();
+      errorMessage =
+          (msg.contains('tls') ||
+              msg.contains('ssl') ||
+              msg.contains('handshake'))
+          ? 'SSL/TLS handshake failed. The server may not support HTTPS. '
+                'Try switching to HTTP instead of HTTPS.'
+          : 'Secure connection failed. Try using HTTP instead of HTTPS, '
+                'or contact your administrator.';
+      _resetDatabaseState();
     } on SocketException catch (e) {
-      if (e.toString().contains('Network is unreachable')) {
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('network is unreachable') ||
+          msg.contains('no route to host')) {
         errorMessage =
             'No internet connection. Please check your network settings and try again.';
-      } else if (e.toString().contains('Connection refused')) {
+      } else if (msg.contains('connection refused')) {
         errorMessage =
-            'Server is not responding. Please verify the server URL and ensure the server is running.';
+            'Connection refused. Please verify the server URL and port are correct, '
+            'and that the server is running.';
+      } else if (msg.contains('connection timed out') ||
+          msg.contains('timed out')) {
+        errorMessage =
+            'Connection timed out. The server may be slow or unreachable. Please try again.';
+      } else if (msg.contains('host lookup failed') ||
+          msg.contains('failed host lookup')) {
+        errorMessage =
+            'Server not found. Please check the server URL for typos and verify your DNS settings.';
+      } else if (msg.contains('ssl') ||
+          msg.contains('certificate') ||
+          msg.contains('tls')) {
+        errorMessage =
+            'SSL certificate error. Try switching from HTTPS to HTTP, '
+            'or contact your administrator about the server certificate.';
       } else {
         errorMessage =
-            'Network error occurred. Please check your internet connection and server URL.';
+            'Network error. Please check your internet connection and server URL.';
       }
       _resetDatabaseState();
     } on TimeoutException catch (_) {
       errorMessage =
-          'Connection timed out. The server may be slow or unreachable. Please try again.';
+          'Connection timed out. The server may be slow or unreachable. '
+          'Try switching between HTTP and HTTPS, then try again.';
+      _resetDatabaseState();
+    } on TlsException {
+      errorMessage =
+          'TLS/SSL error. The server certificate may be invalid or the server '
+          'does not support HTTPS. Try switching to HTTP.';
       _resetDatabaseState();
     } on OdooException catch (e) {
       errorMessage = _formatOdooError(e);
       _resetDatabaseState();
+    } on DatabaseListingDisabledException catch (e) {
+      // The genuine "listing turned off server-side" case — previously every
+      // unclassified failure was reported this way, which sent users hunting
+      // for a server setting when the real problem was http vs https.
+      errorMessage = e.message;
+      _resetDatabaseState();
     } on FormatException catch (e) {
-      if (e.toString().toLowerCase().contains('html')) {
-        errorMessage =
-            'Invalid server response. This may not be an Odoo server or the URL path is incorrect.';
-      } else {
-        errorMessage =
-            'Server sent invalid data format. Please verify this is an Odoo server.';
-      }
+      // The raw exception is often the server's own HTML error page, doctype
+      // and all, so it never reaches the user directly.
+      final msg = e.toString().toLowerCase();
+      errorMessage =
+          (msg.contains('html') ||
+              msg.contains('<!doctype') ||
+              msg.contains('<html'))
+          ? 'Invalid server response. This may not be an Odoo server. '
+                'Check if HTTPS should be HTTP.'
+          : 'Server returned an unexpected data format. '
+                'Please verify this is a valid Odoo server URL.';
+      _resetDatabaseState();
+    } on HttpException catch (e) {
+      final msg = e.message.toLowerCase();
+      errorMessage =
+          (msg.contains('301') ||
+              msg.contains('302') ||
+              msg.contains('redirect'))
+          ? 'Server redirected the request. Try switching between HTTP and HTTPS.'
+          : 'HTTP error. Please verify the server URL is correct.';
       _resetDatabaseState();
     } catch (e) {
-      errorMessage = 'The listing database is currently disabled.';
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('ssl') ||
+          msg.contains('certificate') ||
+          msg.contains('tls') ||
+          msg.contains('handshake')) {
+        errorMessage =
+            'SSL/Certificate error. Try switching from HTTPS to HTTP '
+            'or contact your administrator.';
+      } else if (msg.contains('http') && msg.contains('https')) {
+        errorMessage =
+            'Protocol mismatch. Try switching between HTTP and HTTPS.';
+      } else if (msg.contains('refused') || msg.contains('unreachable')) {
+        errorMessage =
+            'Cannot reach the server. Please check the URL and your internet connection.';
+      } else {
+        errorMessage =
+            'Unable to connect to server. Please verify the server URL is correct.';
+      }
       _resetDatabaseState();
     } finally {
       isLoadingDatabases = false;
@@ -518,6 +595,22 @@ class LoginProvider with ChangeNotifier {
     database = null;
     urlCheck = false;
     dropdownItems.clear();
+  }
+
+  /// Drops the error shown for the last failed lookup. A screen that mirrors
+  /// [errorMessage] has to clear it here, at the source — clearing only its own
+  /// copy just gets the old message copied straight back on the next rebuild.
+  void clearError() {
+    if (errorMessage == null) return;
+    errorMessage = null;
+    _safeNotifyListeners();
+  }
+
+  /// Forgets the database list of whatever server was entered before, without
+  /// asking any server for anything — for when the URL has been emptied.
+  void resetDatabaseList() {
+    _resetDatabaseState();
+    _safeNotifyListeners();
   }
 
   String _formatOdooError(OdooException e) {
@@ -570,6 +663,12 @@ class LoginProvider with ChangeNotifier {
         throw Exception('Please fill in all required fields.');
       }
 
+      // This screen is also used to re-enter a stored account's password
+      // from the account switcher, while another account is still active.
+      // `loginAndSaveSession` persists over that account, so it is what gets
+      // put back if the server turns out to be unusable.
+      final previous = await OdooSessionManager.getCurrentSession();
+
       final loginSuccess = await OdooSessionManager.loginAndSaveSession(
         serverUrl: serverUrl,
         database: database!,
@@ -578,16 +677,34 @@ class LoginProvider with ChangeNotifier {
       );
 
       if (loginSuccess == LoginStatus.success) {
+        final client = await OdooSessionManager.getClientEnsured();
+
+        // Puts back whichever session was active before this attempt —
+        // `loginAndSaveSession` has already persisted the new one, so a
+        /// refused account must not be left as the active session.
+        Future<void> rollback() async {
+          if (previous != null) {
+            await OdooSessionManager.updateSession(previous);
+          } else {
+            await OdooSessionManager.logout();
+          }
+        }
+
+        if (!await isEventModuleInstalled(client)) {
+          await rollback();
+          return LoginResult.moduleMissing;
+        }
+
+        // Installed is not enough: an internal user with no Event role signs
+        // in fine and then meets an access error on every screen.
+        if (!await hasEventAccess(client)) {
+          await rollback();
+          errorMessage = AccessDenial.noEventAccess.message;
+          return LoginResult.noEventAccess;
+        }
+
         await _saveCredentials();
         await _setAuthenticationTimestamp();
-
-        /// Store account in SessionService for account switching
-        try {
-          final sessionService = SessionService.instance;
-          final currentSession = await OdooSessionManager.getCurrentSession();
-
-          if (currentSession != null) {}
-        } catch (e) {}
 
         return LoginResult.success;
       } else {
@@ -598,6 +715,16 @@ class LoginProvider with ChangeNotifier {
         errorMessage = 'Login failed. Please check your credentials.';
         return LoginResult.invalidCredentials;
       }
+    } on PortalUserException catch (e) {
+      // Correct password, wrong kind of account. Must precede the generic
+      // handlers below, which would otherwise report it as bad credentials.
+      errorMessage = e.message;
+      return LoginResult.portalUser;
+    } on DatabaseExpiredException {
+      // Correct password, expired subscription. Same reason to precede the
+      // handlers below — and the `database` text match in particular.
+      errorMessage = DatabaseExpiredException.message;
+      return LoginResult.databaseExpired;
     } on SocketException catch (e) {
       if (e.toString().contains('Network is unreachable')) {
         errorMessage =
@@ -610,7 +737,7 @@ class LoginProvider with ChangeNotifier {
             'Network error occurred. Please check your internet connection and server URL.';
       }
       return LoginResult.networkError;
-    } on TimeoutException catch (e) {
+    } on TimeoutException catch (_) {
       errorMessage =
           'Connection timed out. The server may be slow or unreachable. Please try again.';
       return LoginResult.networkError;
@@ -627,7 +754,7 @@ class LoginProvider with ChangeNotifier {
         errorMessage = _formatOdooError(e);
       }
       return LoginResult.invalidCredentials;
-    } catch (e) {
+    } catch (_) {
       errorMessage =
           'Login failed. Please check your credentials and server settings.';
       return LoginResult.invalidCredentials;
@@ -655,7 +782,7 @@ class LoginProvider with ChangeNotifier {
       }
       final uri = Uri.parse(urlToValidate);
       return uri.hasScheme && uri.host.isNotEmpty;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
@@ -677,8 +804,37 @@ class LoginProvider with ChangeNotifier {
     required String serverUrls,
     required String databses,
     required String sessionId,
+
+    /// True when this session was established through the TOTP screen, so it
+    /// can never later be silently "refreshed" by replaying the password —
+    /// see `AppSessionData.usesTwoFactor`.
+    bool usesTwoFactor = false,
+
+    /// False while a caller still has a gate to run (e.g. the OTP screen's
+    /// module-installed check) before this session should be written to
+    /// prefs or registered as an account — only the in-memory client/cache is
+    /// updated, and the caller commits explicitly once the gate passes.
+    bool persistToPrefs = true,
   }) async {
     try {
+      // First of all, before anything is persisted or cached. The 2FA flow
+      // already holds the server's raw `session_info`, which carries
+      // `expiration_date` on Enterprise, so this costs no extra request.
+      if (DatabaseExpiry.hasExpired(
+        sessionInfo[DatabaseExpiry.sessionInfoKey],
+      )) {
+        throw const DatabaseExpiredException();
+      }
+
+      // The 2FA flow reaches here with the server's raw `session_info`,
+      // which already carries `is_internal_user` (Odoo computes it as
+      // `base.group_user` membership) — so the portal check costs nothing
+      // extra on this path. Absent key means an older or unusual server:
+      // treat it as internal rather than locking a valid user out.
+      if (OdooSessionManager.isPortalSessionInfo(sessionInfo)) {
+        throw PortalUserException();
+      }
+
       final Map<String, dynamic> userCompanies =
           sessionInfo['user_companies'] as Map<String, dynamic>;
 
@@ -704,13 +860,14 @@ class LoginProvider with ChangeNotifier {
         serverVersion: sessionInfo['server_version'],
       );
 
-      /// Persist last used server + database
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('lastServerUrl', sessionInfo['server_url'] ?? '');
-      await prefs.setString('lastDatabase', sessionInfo['db'] ?? '');
-
-      /// Mark logged in
-      await prefs.setBool('isLoggedIn', true);
+      // Persist last used server + database — only once the caller has
+      // actually committed to this session (see [persistToPrefs]).
+      if (persistToPrefs) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('lastServerUrl', sessionInfo['server_url'] ?? '');
+        await prefs.setString('lastDatabase', sessionInfo['db'] ?? '');
+        await prefs.setBool('isLoggedIn', true);
+      }
 
       final clientnew = OdooClient(serverUrls, sessionId: odooSession);
 
@@ -721,10 +878,12 @@ class LoginProvider with ChangeNotifier {
         client!.sessionId!,
         serverUrls,
         password2,
+        usesTwoFactor: usesTwoFactor,
+        persist: persistToPrefs,
       );
 
       notifyListeners();
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }

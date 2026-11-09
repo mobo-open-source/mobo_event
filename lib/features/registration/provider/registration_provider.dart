@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobo_event/features/registration/model/attendee_group.dart';
 import 'package:mobo_event/features/registration/model/attendee_model.dart';
 import 'package:mobo_event/features/registration/model/attendee_short_model.dart';
 import 'package:mobo_event/features/registration/model/demo_question_answer.dart';
@@ -17,6 +18,10 @@ class RegistrationProvider extends ChangeNotifier {
   bool isLoading = true;
   List<AttendeeShortModel>? fetchedAttendees;
   List<AttendeeShortModel>? fetchedAttendeesByEvent;
+
+  /// Why the last attendee list load failed, or null. The lists above are null
+  /// after a failure; this is what the error view shows for it.
+  Object? loadError;
   List<DemoQuestionAnswer> demoQuestionAnswer = [];
   RegistrationFullModel? selectedAttendee;
   bool editLoading = true;
@@ -43,6 +48,42 @@ class RegistrationProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How the all-attendees list and the per-event list are grouped (the filter
+  /// sheet's Group By tab), or null for the plain, paged list. They are
+  /// separate screens with separate filters, so separate choices.
+  AttendeeGroupBy? groupByTotal;
+  AttendeeGroupBy? groupByEvent;
+
+  bool get isGroupedTotal => groupByTotal != null;
+  bool get isGroupedEvent => groupByEvent != null;
+
+  void setGroupByTotal(AttendeeGroupBy? value) {
+    groupByTotal = value;
+    notifyListeners();
+  }
+
+  void setGroupByEvent(AttendeeGroupBy? value) {
+    groupByEvent = value;
+    notifyListeners();
+  }
+
+  /// Back to no grouping, for a screen that is opening afresh.
+  void clearGroupBy() {
+    groupByTotal = null;
+    groupByEvent = null;
+    notifyListeners();
+  }
+
+  /// A grouped list holds every attendee, so [fetchedAttendees] is split into
+  /// groups instead of being paged.
+  List<AttendeeGroup> get groupedAttendeesTotal => groupByTotal == null
+      ? const []
+      : groupAttendees(fetchedAttendees ?? const [], groupByTotal!);
+
+  List<AttendeeGroup> get groupedAttendeesEvent => groupByEvent == null
+      ? const []
+      : groupAttendees(fetchedAttendeesByEvent ?? const [], groupByEvent!);
+
   ///set active filters
   void setActiveFiltersTotal(List<String> filters) {
     activeFiltersByTotal = List.from(filters);
@@ -58,9 +99,13 @@ class RegistrationProvider extends ChangeNotifier {
   int currentPageEvent = 1;
   final int pageSizeEvent = 40;
   int totalRecordsEvent = 0;
-  int get startCountEvent =>
-      totalRecordsEvent == 0 ? 0 : ((currentPageEvent - 1) * pageSizeEvent) + 1;
+  int get startCountEvent => totalRecordsEvent == 0
+      ? 0
+      : isGroupedEvent
+      ? 1
+      : ((currentPageEvent - 1) * pageSizeEvent) + 1;
   int get endCountEvent {
+    if (isGroupedEvent) return totalRecordsEvent;
     final endEvent = currentPageEvent * pageSizeEvent;
     return endEvent > totalRecordsEvent ? totalRecordsEvent : endEvent;
   }
@@ -70,8 +115,10 @@ class RegistrationProvider extends ChangeNotifier {
       : '$startCountEvent–$endCountEvent / $totalRecordsEvent';
   int get totalPagesEvent =>
       totalRecordsEvent == 0 ? 1 : (totalRecordsEvent / pageSizeEvent).ceil();
-  bool get canGoPreviousEvent => currentPageEvent > 1;
-  bool get canGoNextEvent => currentPageEvent < totalPagesEvent;
+  /// A grouped list shows everything at once: there is no next page.
+  bool get canGoPreviousEvent => !isGroupedEvent && currentPageEvent > 1;
+  bool get canGoNextEvent =>
+      !isGroupedEvent && currentPageEvent < totalPagesEvent;
   void nextPageEvent() {
     if (!canGoNextEvent) return;
     currentPageEvent++;
@@ -90,9 +137,13 @@ class RegistrationProvider extends ChangeNotifier {
   int currentPage = 1;
   final int pageSize = 40;
   int totalRecords = 0;
-  int get startCount =>
-      totalRecords == 0 ? 0 : ((currentPage - 1) * pageSize) + 1;
+  int get startCount => totalRecords == 0
+      ? 0
+      : isGroupedTotal
+      ? 1
+      : ((currentPage - 1) * pageSize) + 1;
   int get endCount {
+    if (isGroupedTotal) return totalRecords;
     final end = currentPage * pageSize;
     return end > totalRecords ? totalRecords : end;
   }
@@ -101,8 +152,8 @@ class RegistrationProvider extends ChangeNotifier {
       totalRecords == 0 ? '0/0' : '$startCount–$endCount / $totalRecords';
   int get totalPages =>
       totalRecords == 0 ? 1 : (totalRecords / pageSize).ceil();
-  bool get canGoPrevious => currentPage > 1;
-  bool get canGoNext => currentPage < totalPages;
+  bool get canGoPrevious => !isGroupedTotal && currentPage > 1;
+  bool get canGoNext => !isGroupedTotal && currentPage < totalPages;
 
   void nextPage() {
     if (!canGoNext) return;
@@ -116,16 +167,41 @@ class RegistrationProvider extends ChangeNotifier {
     loadAttendees();
   }
 
+  /// Bumped by every load; a fetch that is no longer the latest (the user
+  /// typed or filtered again) drops its result and leaves the loading state
+  /// to the newer one.
+  int _eventRequest = 0;
+  int _totalRequest = 0;
+
   ///load attendees by event
   Future loadAttendeesByEvent({
     bool reset = false,
     String search = '',
     required int eventId,
   }) async {
+    final request = ++_eventRequest;
     try {
       isLoadingEvent = true;
+      loadError = null;
       if (reset) currentPageEvent = 1;
       notifyListeners();
+
+      if (isGroupedEvent) {
+        // Grouped: everything, so the groups and their counts are exact.
+        currentPageEvent = 1;
+        final all = await services.getAllAttendees(
+          eventId: eventId,
+          search: search,
+          filter: activeFiltersByEvent,
+        );
+        if (request != _eventRequest) return;
+        fetchedAttendeesByEvent = all;
+        totalRecordsEvent = all.length;
+        isLoadingEvent = false;
+        notifyListeners();
+        return;
+      }
+
       final offsetEvent = (currentPageEvent - 1) * pageSizeEvent;
 
       final response = await services.getAttendeesByEvent(
@@ -135,18 +211,23 @@ class RegistrationProvider extends ChangeNotifier {
         search: search,
         filter: activeFiltersByEvent,
       );
-      fetchedAttendeesByEvent = response;
-      totalRecordsEvent = await services.gettingAttendeesCountByEvent(
+      if (request != _eventRequest) return;
+      final count = await services.gettingAttendeesCountByEvent(
         eventId: eventId,
         search: search,
         filter: activeFiltersByEvent,
       );
+      if (request != _eventRequest) return;
+      fetchedAttendeesByEvent = response;
+      totalRecordsEvent = count;
 
       isLoadingEvent = false;
       notifyListeners();
     } catch (e) {
+      if (request != _eventRequest) return;
       isLoadingEvent = false;
       fetchedAttendeesByEvent = null;
+      loadError = e;
       notifyListeners();
       rethrow;
     }
@@ -154,10 +235,28 @@ class RegistrationProvider extends ChangeNotifier {
 
   ///load attendees
   Future loadAttendees({bool reset = false, String search = ''}) async {
+    final request = ++_totalRequest;
     try {
       isLoading = true;
+      loadError = null;
       if (reset) currentPage = 1;
       notifyListeners();
+
+      if (isGroupedTotal) {
+        // Grouped: everything, so the groups and their counts are exact.
+        currentPage = 1;
+        final all = await services.getAllAttendees(
+          search: search,
+          filter: activeFiltersByTotal,
+        );
+        if (request != _totalRequest) return;
+        fetchedAttendees = all;
+        totalRecords = all.length;
+        isLoading = false;
+        notifyListeners();
+        return;
+      }
+
       final offset = (currentPage - 1) * pageSize;
 
       final response = await services.getAttendeesByPagination(
@@ -166,17 +265,22 @@ class RegistrationProvider extends ChangeNotifier {
         search: search,
         filter: activeFiltersByTotal,
       );
-      fetchedAttendees = response;
-      totalRecords = await services.gettingAttendeesCount(
+      if (request != _totalRequest) return;
+      final count = await services.gettingAttendeesCount(
         search: search,
         filter: activeFiltersByTotal,
       );
+      if (request != _totalRequest) return;
+      fetchedAttendees = response;
+      totalRecords = count;
 
       isLoading = false;
       notifyListeners();
     } catch (e) {
+      if (request != _totalRequest) return;
       isLoading = false;
       fetchedAttendees = null;
+      loadError = e;
       notifyListeners();
       rethrow;
     }
@@ -199,7 +303,7 @@ class RegistrationProvider extends ChangeNotifier {
         scannedAttendee = response;
       }
       notifyListeners();
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -228,7 +332,7 @@ class RegistrationProvider extends ChangeNotifier {
       final result = await services.onChangeNew(eventId);
       newRegistration = result;
       notifyListeners();
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -242,7 +346,7 @@ class RegistrationProvider extends ChangeNotifier {
       selectedAttendee = result;
       editLoading = false;
       notifyListeners();
-    } catch (e) {
+    } catch (_) {
       editLoading = false;
       notifyListeners();
       rethrow;

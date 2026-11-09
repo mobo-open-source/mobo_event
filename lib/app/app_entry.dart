@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../shared/widgets/loaders/loading_indicator.dart';
-import '../shared/widgets/errors/module_not_installed_error.dart';
+import '../shared/widgets/dialogs/access_denied_dialog.dart';
+import '../shared/widgets/dialogs/module_missing_dialog.dart';
 
 import '../features/login/pages/server_setup_screen.dart';
 import '../features/login/pages/app_lock_screen.dart';
@@ -10,7 +11,10 @@ import '../core/services/session_service.dart';
 import '../core/services/odoo_session_manager.dart';
 import '../core/services/biometric_context_service.dart';
 import '../core/services/connectivity_service.dart';
+import '../core/services/event_access_gate.dart';
+import '../core/services/event_module_gate.dart';
 import '../core/routing/page_transition.dart';
+import '../core/utils/database_expiry.dart';
 
 import 'home_scaffold.dart';
 
@@ -26,6 +30,7 @@ class AppEntry extends StatefulWidget {
 class _AppEntryState extends State<AppEntry> {
   late Future<Map<String, dynamic>> _initFuture;
   bool _moduleDialogShown = false;
+  bool _accessDialogShown = false;
 
   @override
   void initState() {
@@ -44,6 +49,7 @@ class _AppEntryState extends State<AppEntry> {
 
     bool sessionValid = false;
     bool eventInstalled = false;
+    bool eventAccess = true;
     bool forceServerSetup = false;
 
     if (isLoggedIn) {
@@ -53,25 +59,40 @@ class _AppEntryState extends State<AppEntry> {
         try {
           final client = await OdooSessionManager.getClientEnsured();
 
-          /// Extra session sanity check
-          await client.callRPC('/web/session/get_session_info', 'call', {});
+          final sessionInfo = await client.callRPC(
+            '/web/session/get_session_info',
+            'call',
+            {},
+          );
 
-          ///Event module check
-          final count = await client.callKw({
-            'model': 'ir.module.module',
-            'method': 'search_count',
-            'args': [
-              [
-                ['name', '=', 'event'],
-                ['state', '=', 'installed'],
-              ],
-            ],
-            'kwargs': {},
-          });
+          // First thing once the session proves valid, ahead of the module
+          // and access checks, and read from the answer just received rather
+          // than asked for again. Only the current account is signed out; the
+          // other saved accounts stay where they are.
+          if (DatabaseExpiry.hasExpired(
+            sessionInfo is Map
+                ? sessionInfo[DatabaseExpiry.sessionInfoKey]
+                : null,
+          )) {
+            await OdooSessionManager.logout();
+            return {
+              'isLoggedIn': false,
+              'biometricEnabled': biometricEnabled,
+              'eventInstalled': false,
+              'eventAccess': true,
+              'forceServerSetup': false,
+              'databaseExpired': true,
+            };
+          }
 
-          eventInstalled = (count as num) > 0;
+          eventInstalled = await isEventModuleInstalled(client);
 
-          if (eventInstalled) {
+          // A session saved before the sign-in flows checked Event access
+          // (or one whose Event role has since been taken away) meets the
+          // same refusal a fresh sign-in would.
+          if (eventInstalled) eventAccess = await hasEventAccess(client);
+
+          if (eventInstalled && eventAccess) {
             final sessionService = SessionService.instance;
             final currentSession = await OdooSessionManager.getCurrentSession();
 
@@ -83,7 +104,7 @@ class _AppEntryState extends State<AppEntry> {
               );
             }
           }
-        } catch (e) {
+        } catch (_) {
           forceServerSetup = true;
         }
       }
@@ -93,7 +114,9 @@ class _AppEntryState extends State<AppEntry> {
       'isLoggedIn': isLoggedIn && sessionValid,
       'biometricEnabled': biometricEnabled,
       'eventInstalled': eventInstalled,
+      'eventAccess': eventAccess,
       'forceServerSetup': forceServerSetup,
+      'databaseExpired': false,
     };
   }
 
@@ -114,21 +137,31 @@ class _AppEntryState extends State<AppEntry> {
         final isLoggedIn = data['isLoggedIn'] as bool;
         final biometricEnabled = data['biometricEnabled'] as bool;
         final eventInstalled = data['eventInstalled'] as bool;
+        final eventAccess = data['eventAccess'] as bool;
         final forceServerSetup = data['forceServerSetup'] as bool;
+        final databaseExpired = data['databaseExpired'] as bool;
 
         if (forceServerSetup) {
           return const ServerSetupScreen();
+        }
+
+        // The session was ended above. The server screen is where the
+        // database is chosen, so it is where the reason is shown.
+        if (databaseExpired) {
+          return const ServerSetupScreen(
+            initialError: DatabaseExpiredException.message,
+          );
         }
 
         final biometricContext = BiometricContextService();
         final shouldSkipBiometric =
             widget.skipBiometric || biometricContext.shouldSkipBiometric;
 
-        ///  Biometric gate
         if (isLoggedIn &&
             biometricEnabled &&
             !shouldSkipBiometric &&
-            eventInstalled) {
+            eventInstalled &&
+            eventAccess) {
           return AppLockScreen(
             onAuthenticationSuccess: () {
               Navigator.pushReplacement(
@@ -139,27 +172,36 @@ class _AppEntryState extends State<AppEntry> {
           );
         }
 
-        /// Event module missing
         if (isLoggedIn && !eventInstalled) {
           if (!_moduleDialogShown) {
             _moduleDialogShown = true;
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (_) => const ModuleMissingDialog(),
-              );
+              if (context.mounted) showModuleMissingDialog(context);
             });
           }
           return const ServerSetupScreen();
         }
 
-        ///  Logged in → App
+        if (isLoggedIn && !eventAccess) {
+          if (!_accessDialogShown) {
+            _accessDialogShown = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                showAccessDeniedDialog(
+                  context,
+                  denial: AccessDenial.noEventAccess,
+                  actionLabel: 'Back to Login',
+                );
+              }
+            });
+          }
+          return const ServerSetupScreen();
+        }
+
         if (isLoggedIn) {
           return const HomeScaffold();
         }
 
-        ///  Not logged in
         return const ServerSetupScreen();
       },
     );

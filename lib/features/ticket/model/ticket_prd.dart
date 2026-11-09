@@ -30,4 +30,13 @@ class TicketPrdModel {
       'type': type,
     };
   }
+
+  /// Records are the same product when their ids match, so a picker
+  /// recognises the selected one among freshly loaded options.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is TicketPrdModel && other.id == id);
+
+  @override
+  int get hashCode => id.hashCode;
 }

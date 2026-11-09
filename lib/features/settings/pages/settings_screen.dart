@@ -1,9 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/services/biometric_service.dart';
+import '../../../core/utils/screen_layout.dart';
 import '../../../shared/widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/odoo_dropdown_tile.dart';
@@ -111,8 +114,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final textPrimary = isDark ? Colors.white : Colors.black87;
     final textSecondary = isDark ? Colors.grey[400] : Colors.grey[600];
 
+    // The tiles carry their own 16px inset, like the Appearance and Language
+    // tiles; only the divider, socials and copyright below them get one here.
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -153,72 +158,80 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
 
-          const SizedBox(height: 16),
-          Divider(color: isDark ? Colors.grey[800] : Colors.grey[200]),
-          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 16),
+                Divider(color: isDark ? Colors.grey[800] : Colors.grey[200]),
+                const SizedBox(height: 16),
 
-          Center(
-            child: Text(
-              'Follow Us',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: textPrimary,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildSocialButton(
-                context,
-                'assets/images/social/facebook.png',
-                const Color(0xFF1877F2),
-                'Facebook',
-                () => _launchUrlSmart(
-                  'https://www.facebook.com/cybrosystechnologies',
-                  title: 'Facebook',
+                Center(
+                  child: Text(
+                    'Follow Us',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: textPrimary,
+                    ),
+                  ),
                 ),
-              ),
-              _buildSocialButton(
-                context,
-                'assets/images/social/linkedin.png',
-                const Color(0xFF0077B5),
-                'LinkedIn',
-                () => _launchUrlSmart(
-                  'https://www.linkedin.com/company/cybrosys/',
-                  title: 'LinkedIn',
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildSocialButton(
+                      context,
+                      'assets/images/social/facebook.png',
+                      const Color(0xFF1877F2),
+                      'Facebook',
+                      () => _launchUrlSmart(
+                        'https://www.facebook.com/cybrosystechnologies',
+                        title: 'Facebook',
+                      ),
+                    ),
+                    _buildSocialButton(
+                      context,
+                      'assets/images/social/linkedin.png',
+                      const Color(0xFF0077B5),
+                      'LinkedIn',
+                      () => _launchUrlSmart(
+                        'https://www.linkedin.com/company/cybrosys/',
+                        title: 'LinkedIn',
+                      ),
+                    ),
+                    _buildSocialButton(
+                      context,
+                      'assets/images/social/instagram.png',
+                      const Color(0xFFE4405F),
+                      'Instagram',
+                      () => _launchUrlSmart(
+                        'https://www.instagram.com/cybrosystech/',
+                        title: 'Instagram',
+                      ),
+                    ),
+                    _buildSocialButton(
+                      context,
+                      'assets/images/social/youtube.png',
+                      const Color(0xFFFF0000),
+                      'YouTube',
+                      () => _launchUrlSmart(
+                        'https://www.youtube.com/channel/UCKjWLm7iCyOYINVspCSanjg',
+                        title: 'YouTube',
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              _buildSocialButton(
-                context,
-                'assets/images/social/instagram.png',
-                const Color(0xFFE4405F),
-                'Instagram',
-                () => _launchUrlSmart(
-                  'https://www.instagram.com/cybrosystech/',
-                  title: 'Instagram',
-                ),
-              ),
-              _buildSocialButton(
-                context,
-                'assets/images/social/youtube.png',
-                const Color(0xFFFF0000),
-                'YouTube',
-                () => _launchUrlSmart(
-                  'https://www.youtube.com/channel/UCKjWLm7iCyOYINVspCSanjg',
-                  title: 'YouTube',
-                ),
-              ),
-            ],
-          ),
 
-          const SizedBox(height: 24),
-          Center(
-            child: Text(
-              '© ${DateTime.now().year} Cybrosys Technologies',
-              style: TextStyle(fontSize: 12, color: textSecondary),
+                const SizedBox(height: 24),
+                Center(
+                  child: Text(
+                    '© ${DateTime.now().year} Cybrosys Technologies',
+                    style: TextStyle(fontSize: 12, color: textSecondary),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -237,7 +250,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final ok = await launchUrl(uri, mode: mode);
       if (!ok) {
         if (!mounted) return;
-        CustomSnackbar.showError(context, 'No app available to open this link.');
+        CustomSnackbar.showError(
+          context,
+          'No app available to open this link.',
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -308,204 +324,229 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
-      body: Consumer<SettingsProvider>(
-        builder: (context, settingsProvider, child) {
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              SectionCard(
-                title: 'Appearance',
-                icon: HugeIcons.strokeRoundedPaintBoard,
-                children: [
-                  Consumer<ThemeProvider>(
-                    builder: (_, themeProvider, child) {
-                      return SwitchTile(
-                        title: 'Dark Mode',
-                        subtitle: themeProvider.isDarkMode
-                            ? 'Dark theme is active'
-                            : 'Light theme is active',
-                        icon: themeProvider.isDarkMode
-                            ? HugeIcons.strokeRoundedMoon02
-                            : HugeIcons.strokeRoundedSun03,
-                        value: themeProvider.isDarkMode,
-                        onChanged: (value) async {
-                          await themeProvider.setDarkMode(value);
+      // Left/right insets (a notch or a gesture bar sits on the sides when the
+      // phone is sideways) always apply; the bottom one only in landscape, so
+      // portrait keeps its current edge-to-edge scrolling.
+      body: SafeArea(
+        top: false,
+        bottom: context.isLandscape,
+        child: Consumer<SettingsProvider>(
+          builder: (context, settingsProvider, child) {
+            // One column of cards in every orientation. In landscape the list
+            // is padded in so the cards stay at most 600dp wide and centred,
+            // while the scroll view (and its scrollbar) still spans the full
+            // width. Portrait keeps its 16dp margin.
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final horizontal = context.isLandscape
+                    ? math.max(16.0, (constraints.maxWidth - 600) / 2)
+                    : 16.0;
+                return ListView(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: horizontal,
+                    vertical: 16,
+                  ),
+                  children: [
+                    SectionCard(
+                      title: 'Appearance',
+                      icon: HugeIcons.strokeRoundedPaintBoard,
+                      children: [
+                        Consumer<ThemeProvider>(
+                          builder: (_, themeProvider, child) {
+                            return SwitchTile(
+                              title: 'Dark Mode',
+                              subtitle: themeProvider.isDarkMode
+                                  ? 'Dark theme is active'
+                                  : 'Light theme is active',
+                              icon: themeProvider.isDarkMode
+                                  ? HugeIcons.strokeRoundedMoon02
+                                  : HugeIcons.strokeRoundedSun03,
+                              value: themeProvider.isDarkMode,
+                              onChanged: (value) async {
+                                await themeProvider.setDarkMode(value);
+                                if (mounted) {
+                                  CustomSnackbar.showSuccess(
+                                    this.context,
+                                    'Theme changed to ${value ? 'dark' : 'light'} mode',
+                                  );
+                                }
+                              },
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SectionCard(
+                      title: 'Security',
+                      icon: HugeIcons.strokeRoundedSecurity,
+                      children: [
+                        SwitchTile(
+                          title: 'App Lock',
+                          subtitle: _authStatusDescription,
+                          icon: _isBiometricAvailable
+                              ? HugeIcons.strokeRoundedFingerprintScan
+                              : HugeIcons.strokeRoundedLockPassword,
+                          value: _isBiometricEnabled,
+                          onChanged: (value) {
+                            if (_isBiometricAvailable) {
+                              _toggleBiometric(value);
+                            } else {
+                              CustomSnackbar.showError(
+                                context,
+                                'Biometric authentication not available on this device',
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    SectionCard(
+                      title: 'Language & Region',
+                      icon: HugeIcons.strokeRoundedSettings02,
+                      headerTrailing: IconButton(
+                        tooltip: 'Refresh',
+                        onPressed: () async {
+                          await Future.wait([
+                            settingsProvider.fetchAvailableCurrencies(
+                              markManual: true,
+                            ),
+                            settingsProvider.fetchAvailableTimezones(
+                              markManual: true,
+                            ),
+                            settingsProvider.fetchUserTimezone(),
+                          ]);
                           if (mounted) {
-                            CustomSnackbar.showSuccess(
+                            CustomSnackbar.showInfo(
                               this.context,
-                              'Theme changed to ${value ? 'dark' : 'light'} mode',
+                              'Language & Region refreshed',
                             );
                           }
                         },
-                      );
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              SectionCard(
-                title: 'Security',
-                icon: HugeIcons.strokeRoundedSecurity,
-                children: [
-                  SwitchTile(
-                    title: 'App Lock',
-                    subtitle: _authStatusDescription,
-                    icon: _isBiometricAvailable
-                        ? HugeIcons.strokeRoundedFingerprintScan
-                        : HugeIcons.strokeRoundedLockPassword,
-                    value: _isBiometricEnabled,
-                    onChanged: (value) {
-                      if (_isBiometricAvailable) {
-                        _toggleBiometric(value);
-                      } else {
-                        CustomSnackbar.showError(
-                          context,
-                          'Biometric authentication not available on this device',
-                        );
-                      }
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              SectionCard(
-                title: 'Language & Region',
-                icon: HugeIcons.strokeRoundedSettings02,
-                headerTrailing: IconButton(
-                  tooltip: 'Refresh',
-                  onPressed: () async {
-                    await Future.wait([
-                      settingsProvider.fetchAvailableCurrencies(markManual: true),
-                      settingsProvider.fetchAvailableTimezones(markManual: true),
-                    ]);
-                    if (mounted) {
-                      CustomSnackbar.showInfo(
-                        this.context,
-                        'Language & Region refreshed',
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.refresh, size: 18),
-                ),
-                children: [
-                  OdooDropdownTile(
-                    title: 'Language',
-                    subtitle: 'Select your preferred language',
-                    icon: HugeIcons.strokeRoundedTranslate,
-                    selectedValue: 'English',
-                    options: const [],
-                    isLoading: settingsProvider.isLoadingLanguages,
-                    onChanged: (_) {},
-                    displayKey: 'name',
-                    valueKey: 'code',
-                    lastUpdated: settingsProvider.languagesUpdatedAt,
-                  ),
-                  OdooDropdownTile(
-                    title: 'Currency',
-                    subtitle: 'Default currency for transactions',
-                    icon: HugeIcons.strokeRoundedDollar01,
-                    selectedValue: settingsProvider.selectedCurrency,
-                    options: settingsProvider.availableCurrencies,
-                    isLoading: settingsProvider.isLoadingCurrencies,
-                    onChanged: (value) async {
-                      try {
-                        await settingsProvider.updateCurrency(value!);
-                        if (mounted) {
-                          CustomSnackbar.showSuccess(
-                            this.context,
-                            'Currency updated to ${settingsProvider.getCurrencyDisplayName(value)}',
-                          );
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          CustomSnackbar.showError(
-                            this.context,
-                            'Failed to update currency: $e',
-                          );
-                        }
-                      }
-                    },
-                    displayKey: 'full_name',
-                    valueKey: 'name',
-                    lastUpdated: settingsProvider.currenciesUpdatedAt,
-                  ),
-                  OdooDropdownTile(
-                    title: 'Timezone',
-                    subtitle: 'Your local timezone',
-                    icon: HugeIcons.strokeRoundedClock01,
-                    selectedValue: settingsProvider.selectedTimezone,
-                    options: settingsProvider.availableTimezones,
-                    isLoading: settingsProvider.isLoadingTimezones,
-                    onChanged: (value) async {
-                      try {
-                        await settingsProvider.updateTimezone(value!);
-                        if (mounted) {
-                          CustomSnackbar.showSuccess(
-                            this.context,
-                            'Timezone updated to ${settingsProvider.getTimezoneDisplayName(value)}',
-                          );
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          CustomSnackbar.showError(
-                            this.context,
-                            'Failed to update timezone: $e',
-                          );
-                        }
-                      }
-                    },
-                    displayKey: 'name',
-                    valueKey: 'code',
-                    lastUpdated: settingsProvider.timezonesUpdatedAt,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              SectionCard(
-                title: 'Help & Support',
-                icon: HugeIcons.strokeRoundedCustomerSupport,
-                children: [
-                  ActionTile(
-                    title: 'Odoo Help Center',
-                    subtitle: 'Documentation, guides and resources',
-                    icon: HugeIcons.strokeRoundedHelpCircle,
-                    onTap: () => _launchUrlSmart(
-                      'https://www.odoo.com/documentation',
-                      title: 'Odoo Help Center',
+                        icon: const Icon(Icons.refresh, size: 18),
+                      ),
+                      children: [
+                        OdooDropdownTile(
+                          title: 'Language',
+                          subtitle: 'Select your preferred language',
+                          icon: HugeIcons.strokeRoundedTranslate,
+                          selectedValue: 'English',
+                          options: const [],
+                          isLoading: settingsProvider.isLoadingLanguages,
+                          onChanged: (_) {},
+                          displayKey: 'name',
+                          valueKey: 'code',
+                          lastUpdated: settingsProvider.languagesUpdatedAt,
+                        ),
+                        OdooDropdownTile(
+                          title: 'Currency',
+                          subtitle: 'Default currency for transactions',
+                          icon: HugeIcons.strokeRoundedDollar01,
+                          selectedValue: settingsProvider.selectedCurrency,
+                          options: settingsProvider.availableCurrencies,
+                          isLoading: settingsProvider.isLoadingCurrencies,
+                          onChanged: (value) async {
+                            try {
+                              await settingsProvider.updateCurrency(value!);
+                              if (mounted) {
+                                CustomSnackbar.showSuccess(
+                                  this.context,
+                                  'Currency updated to ${settingsProvider.getCurrencyDisplayName(value)}',
+                                );
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                CustomSnackbar.showError(
+                                  this.context,
+                                  'Failed to update currency: $e',
+                                );
+                              }
+                            }
+                          },
+                          displayKey: 'full_name',
+                          valueKey: 'name',
+                          lastUpdated: settingsProvider.currenciesUpdatedAt,
+                        ),
+                        OdooDropdownTile(
+                          title: 'Timezone',
+                          subtitle: 'Your local timezone',
+                          icon: HugeIcons.strokeRoundedClock01,
+                          selectedValue: settingsProvider.selectedTimezone,
+                          options: settingsProvider.availableTimezones,
+                          isLoading: settingsProvider.isLoadingTimezones,
+                          onChanged: (value) async {
+                            try {
+                              await settingsProvider.updateTimezone(value!);
+                              if (mounted) {
+                                CustomSnackbar.showSuccess(
+                                  this.context,
+                                  'Timezone updated to ${settingsProvider.getTimezoneDisplayName(value)}',
+                                );
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                CustomSnackbar.showError(
+                                  this.context,
+                                  'Failed to update timezone: $e',
+                                );
+                              }
+                            }
+                          },
+                          displayKey: 'name',
+                          valueKey: 'code',
+                          lastUpdated: settingsProvider.timezonesUpdatedAt,
+                        ),
+                      ],
                     ),
-                  ),
-                  ActionTile(
-                    title: 'Odoo Support',
-                    subtitle: 'Create a ticket with Odoo Support',
-                    icon: HugeIcons.strokeRoundedCustomerSupport,
-                    onTap: () => _launchUrlSmart(
-                      'https://www.odoo.com/help',
-                      title: 'Odoo Support',
+                    const SizedBox(height: 16),
+                    SectionCard(
+                      title: 'Help & Support',
+                      icon: HugeIcons.strokeRoundedCustomerSupport,
+                      children: [
+                        ActionTile(
+                          title: 'Odoo Help Center',
+                          subtitle: 'Documentation, guides and resources',
+                          icon: HugeIcons.strokeRoundedHelpCircle,
+                          onTap: () => _launchUrlSmart(
+                            'https://www.odoo.com/documentation',
+                            title: 'Odoo Help Center',
+                          ),
+                        ),
+                        ActionTile(
+                          title: 'Odoo Support',
+                          subtitle: 'Create a ticket with Odoo Support',
+                          icon: HugeIcons.strokeRoundedCustomerSupport,
+                          onTap: () => _launchUrlSmart(
+                            'https://www.odoo.com/help',
+                            title: 'Odoo Support',
+                          ),
+                        ),
+                        ActionTile(
+                          title: 'Odoo Community Forum',
+                          subtitle: 'Ask the community for help',
+                          icon: HugeIcons.strokeRoundedUserGroup,
+                          onTap: () => _launchUrlSmart(
+                            'https://www.odoo.com/forum/help-1',
+                            title: 'Odoo Forum',
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  ActionTile(
-                    title: 'Odoo Community Forum',
-                    subtitle: 'Ask the community for help',
-                    icon: HugeIcons.strokeRoundedUserGroup,
-                    onTap: () => _launchUrlSmart(
-                      'https://www.odoo.com/forum/help-1',
-                      title: 'Odoo Forum',
+                    const SizedBox(height: 16),
+                    SectionCard(
+                      title: 'About',
+                      icon: HugeIcons.strokeRoundedBuilding06,
+                      children: [_buildAboutContent(context)],
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              SectionCard(
-                title: 'About',
-                icon: HugeIcons.strokeRoundedBuilding06,
-                children: [_buildAboutContent(context)],
-              ),
-              const SizedBox(height: 16),
-
-            ],
-          );
-        },
+                    const SizedBox(height: 16),
+                  ],
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }

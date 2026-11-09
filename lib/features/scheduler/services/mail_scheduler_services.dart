@@ -5,7 +5,6 @@ import '../model/event_mail_scheduler.dart';
 
 class MailSchedulerServices {
 
-
   ///fetch the details from odoo
   Future<List<EventMailScheduler>> fetchCommunication(int eventId) async {
     try {
@@ -46,7 +45,6 @@ class MailSchedulerServices {
       final Map<String, String> templateMap = {};
 
       if (mailIds.isNotEmpty) {
-        /// Fetch mail templates
         final mails = await OdooSessionManager.callKwWithCompany({
           'model': 'mail.template',
           'method': 'read',
@@ -63,7 +61,6 @@ class MailSchedulerServices {
       }
 
       if (smsIds.isNotEmpty) {
-        /// Fetch SMS templates
         final sms = await OdooSessionManager.callKwWithCompany({
           'model': 'sms.template',
           'method': 'read',
@@ -117,7 +114,6 @@ class MailSchedulerServices {
 
   Future<bool> removeScheduledMail(int schedulerId) async {
     try {
-      /// Delete the scheduler
       await OdooSessionManager.callKwWithCompany({
         'model': 'event.mail',
         'method': 'unlink',
@@ -144,7 +140,6 @@ class MailSchedulerServices {
         domain.add(['name', 'ilike', search]);
       }
 
-      /// Fetch the templates
       final response = await OdooSessionManager.callKwWithCompany({
         'model': model,
         'method': 'search_read',
@@ -165,7 +160,7 @@ class MailSchedulerServices {
       return result
           .map((e) => TemplateModel.fromJson(e as Map<String, dynamic>))
           .toList();
-    } catch (e, st) {
+    } catch (_) {
       rethrow;
     }
   }

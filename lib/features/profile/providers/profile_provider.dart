@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import '../../../core/utils/odoo_binary.dart';
+import '../../../core/utils/odoo_compat.dart';
+import '../../../core/utils/odoo_version.dart';
 import '../../../core/services/odoo_session_manager.dart';
+import '../../../core/services/session_service.dart';
+import '../../../core/utils/base64_utils.dart';
 
 class ProfileProvider extends ChangeNotifier {
   bool _isLoading = true;
@@ -21,27 +24,22 @@ class ProfileProvider extends ChangeNotifier {
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
+  /// Stored per account (see [_cacheKey]): this provider outlives every login
+  /// and switch, and one shared key painted the previous account's name and
+  /// photo for a moment after every switch.
   static const String _cacheKeyUser = 'user_profile';
-  static const String _cacheKeyUserWriteDate = 'user_profile_write_date';
-  static const String _cacheKeyPendingUserUpdates =
-      'user_profile_pending_users';
-  static const String _cacheKeyPendingPartnerUpdates =
-      'user_profile_pending_partner';
 
   bool get isLoading => _isLoading;
   Map<String, dynamic>? get userData => _userData;
   Uint8List? get userAvatar => _userAvatar;
+  String? get userAvatarBase64 => OdooBinary.base64(_userData?['image_1920']);
+
   String? get error => _error;
   bool get hasInternet => _hasInternet;
   List<Map<String, dynamic>> get countries => _countries;
   List<Map<String, dynamic>> get states => _states;
   bool get isLoadingCountries => _isLoadingCountries;
   bool get isLoadingStates => _isLoadingStates;
-
-  void setUserData(Map<String, dynamic> data) {
-    _userData = data;
-    notifyListeners();
-  }
 
   String normalizeForEdit(dynamic value) {
     if (value == null) return '';
@@ -50,11 +48,520 @@ class ProfileProvider extends ChangeNotifier {
     return (s.toLowerCase() == 'false' || s.isEmpty) ? '' : s;
   }
 
-  /// Pending offline updates (merged per model)
-  Map<String, dynamic> _pendingUserUpdates = {};
-  Map<String, dynamic> _pendingPartnerUpdates = {};
+  /// The `res.users` fields the profile read falls back to when the server's
+  /// own field list cannot be discovered.
+  ///
+  /// Every one of these is either a plain column or a partner-delegated field
+  /// present on 16 through 19, so this list works on any supported release.
+  static const List<String> _fallbackUserFields = [
+    'name',
+    'login',
+    'email',
+    'website',
+    'function',
+    'image_1920',
+    'company_id',
+    'partner_id',
+  ];
 
-  /// Normalize partner update keys to match server schema
+  /// The `res.partner` fields the profile wants, in read order. Only the ones
+  /// the connected server actually defines are requested — Odoo rejects the
+  /// *entire* read for one unrecognized field, which would silently cost the
+  /// address and phone as well.
+  static const List<String> _wantedPartnerFields = [
+    // `phone` is deliberately absent: it is resolved per server and may live
+    // on res.users instead — see [_getPhoneFieldName].
+    'street',
+    // Read even though only the address dialog shows it: that dialog writes
+    // the whole address back, so a street2 that was never read would be
+    // written back as false and wipe the server's value.
+    'street2',
+    'city',
+    'zip',
+    'state_id',
+    'country_id',
+    // Backs the Related Company row. Read here rather than through a second
+    // call so it is present as soon as the profile is.
+    'parent_id',
+  ];
+
+  /// Which model owns each row the profile screen can show, so availability is
+  /// checked against the schema of the model that actually stores it.
+  static const Map<String, String> _profileFieldOwner = {
+    'name': 'res.users',
+    'login': 'res.users',
+    'email': 'res.users',
+    'website': 'res.users',
+    'function': 'res.users',
+    'image_1920': 'res.users',
+    'company_id': 'res.users',
+    // `phone` and `mobile` are absent on purpose: neither has a fixed owner,
+    // so both are gated on their own resolution instead.
+    'street': 'res.partner',
+    'street2': 'res.partner',
+    'city': 'res.partner',
+    'zip': 'res.partner',
+    'state_id': 'res.partner',
+    'country_id': 'res.partner',
+    'parent_id': 'res.partner',
+  };
+
+  List<String>? _profileUserFieldsCache;
+  String? _profileFieldsAccountKey;
+  Set<String> _discoveredUserFields = {};
+  Set<String> _discoveredPartnerFields = {};
+  bool _userFieldsDiscovered = false;
+  bool _partnerFieldsDiscovered = false;
+
+  /// Which field holds the mobile number on this server, or null when it has
+  /// none. Read together with [_mobileFieldModel], which says where it lives.
+  String? _partnerMobileFieldNameCache;
+
+  /// Which model [_partnerMobileFieldNameCache] lives on: `res.partner`, or
+  /// `res.users` when resolution fell back to `hr`'s field. Null exactly when
+  /// the name cache is null.
+  String? _mobileFieldModel;
+
+  /// The account the mobile-field resolution was made for.
+  ///
+  /// This provider is created once in `main.dart` and outlives every login and
+  /// account switch, so a name resolved for one server must not be reused for
+  /// another. Without this key, switching from an Odoo 17/18 account (where
+  /// `res.partner.mobile` exists) to an Odoo 19 one (where it was removed)
+  /// kept sending the stale `mobile` field name, and Odoo rejects the whole
+  /// call for an unrecognized field — wiping out phone/street/city/zip too.
+  String? _mobileFieldAccountKey;
+
+  bool _mobileFieldResolved = false;
+
+  /// What the connected server's *version* says about `res.partner.mobile`,
+  /// independent of the field probe: true on 16/17/18, false on 19. Stands in
+  /// until the probe answers, so the Mobile row follows the release rather
+  /// than defaulting to "assume it exists" on a server where it does not.
+  bool? _versionSaysMobileExists;
+
+  /// Which field holds the phone number, and on which model — the same pair as
+  /// the mobile cache above. See [_getPhoneFieldName].
+  String? _phoneFieldName;
+  String? _phoneFieldModel;
+  String? _phoneFieldAccountKey;
+  bool _phoneFieldResolved = false;
+
+  /// Whether the connected server has anywhere to keep a phone number.
+  ///
+  /// True until the probe has run: `res.partner.phone` exists on every
+  /// supported release, so the row is worth showing while the answer is still
+  /// unknown rather than blinking out and back.
+  bool get hasPhoneField =>
+      _phoneFieldResolved ? _phoneFieldName != null : true;
+
+  /// Whether the connected server has any field to hold a mobile number.
+  ///
+  /// Null until the first fetch has resolved it. False means Odoo 19 with no
+  /// custom replacement, where the screen hides its Mobile row rather than
+  /// offering an edit the server would drop.
+  bool? get hasMobileField => _mobileFieldResolved
+      ? _partnerMobileFieldNameCache != null
+      : _versionSaysMobileExists;
+
+  /// Whether the connected server exposes [field], so the screen can leave the
+  /// row out entirely instead of showing an edit the server cannot store.
+  ///
+  /// True while discovery has not run for the owning model: a cached profile
+  /// then paints its rows immediately rather than flashing them away and back.
+  bool isProfileFieldAvailable(String field) {
+    if (field == 'mobile') return hasMobileField ?? true;
+    // Not checked against the res.partner schema: it may have resolved to
+    // `hr`'s res.users.work_phone instead — see [_getPhoneFieldName].
+    if (field == 'phone') return hasPhoneField;
+    switch (_profileFieldOwner[field]) {
+      case 'res.users':
+        return _userFieldsDiscovered
+            ? _discoveredUserFields.contains(field)
+            : true;
+      case 'res.partner':
+        return _partnerFieldsDiscovered
+            ? _discoveredPartnerFields.contains(field)
+            : true;
+      default:
+        return true;
+    }
+  }
+
+  /// Identity of the connected account, used to scope the caches above.
+  Future<String?> _accountKey() async {
+    final session = await OdooSessionManager.getCurrentSession();
+    if (session == null) return null;
+    return '${session.serverUrl}|${session.database}|${session.userId}';
+  }
+
+  /// The profile cache key for the connected account.
+  Future<String?> _cacheKey() async {
+    final account = await _accountKey();
+    return account == null ? null : '$_cacheKeyUser|$account';
+  }
+
+  /// This model's `fields_get`, keyed by field name. Throws on any RPC
+  /// failure — deliberately not swallowed here, so a dropped connection is
+  /// what the caller's own `catch` sees rather than looking identical to
+  /// "the model genuinely has none of these fields".
+  ///
+  /// `related` is requested alongside `type` so a caller can tell a plain
+  /// stored column from a field that merely proxies another record's — the two
+  /// behave very differently on write.
+  Future<Map<String, Map<String, dynamic>>> _describeFields(
+    String model,
+  ) async {
+    final result = await OdooSessionManager.callKwWithCompany({
+      'model': model,
+      'method': 'fields_get',
+      'args': [
+        <String>[],
+        ['type', 'related'],
+      ],
+      'kwargs': const {},
+    });
+    if (result is! Map) return const {};
+    return result.map(
+      (key, value) => MapEntry(
+        '$key',
+        value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{},
+      ),
+    );
+  }
+
+  /// True when [describe] shows the field is `related` through `employee_id`
+  /// — i.e. it writes onto the user's `hr.employee`, not onto `res.users`.
+  ///
+  /// Odoo reports `related` as a dotted path (`employee_id.mobile_phone`);
+  /// some releases hand it back as a list of segments instead.
+  bool _isEmployeeBacked(Map<String, dynamic>? describe) {
+    final related = describe?['related'];
+    if (related is String) return related.startsWith('employee_id.');
+    if (related is List && related.isNotEmpty) {
+      return '${related.first}' == 'employee_id';
+    }
+    return false;
+  }
+
+  /// Whether the signed-in user has an `hr.employee` behind them for the
+  /// company the request runs under.
+  ///
+  /// `employee_id` is in `hr`'s `HR_READABLE_FIELDS`, so reading it alone takes
+  /// the same-user sudo path and works for any user, not just HR staff. Odoo
+  /// returns `false` for an unset many2one and `[id, name]` otherwise.
+  Future<bool> _hasLinkedEmployee() async {
+    final session = await OdooSessionManager.getCurrentSession();
+    if (session == null) return false;
+    final rows = await OdooSessionManager.callKwWithCompany({
+      'model': 'res.users',
+      'method': 'read',
+      'args': [
+        [session.userId],
+        ['employee_id'],
+      ],
+      'kwargs': const {},
+    });
+    if (rows is! List || rows.isEmpty) return false;
+    final value = (rows.first as Map)['employee_id'];
+    return value is List && value.isNotEmpty;
+  }
+
+  /// Resolves which field holds the phone number and which model it lives on.
+  ///
+  /// `res.users` is probed *first*, unlike the mobile resolution below. `hr`
+  /// puts `work_phone` there, related through `employee_id`, and that is the
+  /// number Odoo's own user form shows as "Work Phone" — whereas
+  /// `res.partner.phone` survives on every release, so probing the partner
+  /// first would always win and the app would quietly display a different
+  /// number from the one the user sees in Odoo.
+  ///
+  /// Falls back to `res.partner.phone`, which is what a database without `hr`
+  /// — or a user with no employee behind them — actually has.
+  Future<String?> _getPhoneFieldName() async {
+    final accountKey = await _accountKey();
+    if (_phoneFieldAccountKey != accountKey) {
+      _phoneFieldAccountKey = accountKey;
+      _phoneFieldResolved = false;
+      _phoneFieldName = null;
+      _phoneFieldModel = null;
+    }
+    if (_phoneFieldResolved) return _phoneFieldName;
+
+    try {
+      final userFields = await _describeFields('res.users');
+      const userCandidates = ['work_phone', 'x_studio_work_phone'];
+      for (final name in userCandidates) {
+        final describe = userFields[name];
+        if (describe == null) continue;
+        // Same trap as the mobile field: employee-backed with no linked
+        // employee means the related write targets an empty recordset and the
+        // value is dropped silently.
+        if (_isEmployeeBacked(describe) && !await _hasLinkedEmployee()) {
+          continue;
+        }
+        _phoneFieldName = name;
+        _phoneFieldModel = 'res.users';
+        _phoneFieldResolved = true;
+        return name;
+      }
+
+      final partnerFields = await _describeFields('res.partner');
+      if (partnerFields.containsKey('phone')) {
+        _phoneFieldName = 'phone';
+        _phoneFieldModel = 'res.partner';
+        _phoneFieldResolved = true;
+        return 'phone';
+      }
+
+      _phoneFieldName = null;
+      _phoneFieldModel = null;
+      _phoneFieldResolved = true;
+      return null;
+    } catch (_) {
+      // Not marked resolved, so a probe that failed on a dropped connection is
+      // retried. `phone` on the partner is the safe stand-in meanwhile: it is
+      // defined on every supported release.
+      _phoneFieldName = null;
+      _phoneFieldModel = null;
+      return 'phone';
+    }
+  }
+
+  /// Reads one resolved `res.users` field value on its own.
+  ///
+  /// Deliberately a separate, single-field read rather than part of the wide
+  /// one: `res.users.read` only takes the same-user sudo path when *every*
+  /// requested field is self-readable, and `hr` puts `mobile_phone` there.
+  /// Asked for alone it comes back for any user; asked for alongside the rest
+  /// of the profile it would lose that bypass and fall back to plain ACLs on
+  /// `hr.employee`.
+  Future<String?> _readUserFieldValue(String field) async {
+    try {
+      final session = await OdooSessionManager.getCurrentSession();
+      if (session == null) return null;
+      final rows = await OdooSessionManager.callKwWithCompany({
+        'model': 'res.users',
+        'method': 'read',
+        'args': [
+          [session.userId],
+          [field],
+        ],
+        'kwargs': const {},
+      });
+      if (rows is! List || rows.isEmpty) return null;
+      final value = (rows.first as Map)[field];
+      if (value == null || value == false) return null;
+      final text = value.toString();
+      return text.isEmpty || text == 'false' ? null : text;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Which `res.users` fields to read, discovered with `fields_get` rather than
+  /// hard-coded, so the profile carries what the connected release actually
+  /// exposes without the app keeping a per-version list in sync. The
+  /// `res.partner` schema is probed alongside it, for the row gating above.
+  ///
+  /// `fields_get` skips every field the caller may not read, which covers a
+  /// field restricted by its own `groups`. Three kinds are dropped on the way
+  /// out:
+  ///
+  ///  * every `binary` except `image_1920` — a user record carries
+  ///    `image_1920/1024/512/256/128` plus a matching `avatar_*` for each, all
+  ///    base64, which is megabytes for images this screen never shows;
+  ///  * `one2many`/`many2many` — `groups_id` alone is hundreds of ids;
+  ///  * anything `related` through `employee_id`. `fields_get` cannot vouch for
+  ///    these: `hr` declares them on `res.users` with no `groups` of their own,
+  ///    so they pass the filter and then raise on *read* when the underlying
+  ///    `hr` field is restricted, failing the whole profile read. The mobile
+  ///    field is never read from res.users at all — see
+  ///    [_getPartnerMobileFieldName].
+  ///
+  /// Filtering on `store` would be wrong: Odoo defaults related fields to
+  /// `store=False`, and on `res.users` that is every partner-delegated field,
+  /// `name` and `email` included.
+  Future<List<String>> _resolveProfileFields() async {
+    final accountKey = await _accountKey();
+    if (_profileFieldsAccountKey != accountKey) {
+      _profileFieldsAccountKey = accountKey;
+      _profileUserFieldsCache = null;
+      _discoveredUserFields = {};
+      _discoveredPartnerFields = {};
+      _userFieldsDiscovered = false;
+      _partnerFieldsDiscovered = false;
+    }
+    // Probed on its own so a transient failure here retries on the next fetch
+    // instead of being short-circuited by the cached user-field list below.
+    await _ensurePartnerFieldsDiscovered();
+
+    final cached = _profileUserFieldsCache;
+    if (cached != null) return cached;
+
+    try {
+      final described = await _describeFields('res.users');
+      if (described.isEmpty) return _fallbackUserFields;
+
+      const skippedTypes = {'one2many', 'many2many'};
+      final fields = <String>[];
+      described.forEach((name, describe) {
+        final type = describe['type']?.toString() ?? '';
+        if (skippedTypes.contains(type)) return;
+        if (type == 'binary' && name != 'image_1920') return;
+        if (_isEmployeeBacked(describe)) return;
+        fields.add(name);
+      });
+
+      if (fields.isEmpty) return _fallbackUserFields;
+      fields.sort();
+
+      _profileUserFieldsCache = fields;
+      _discoveredUserFields = fields.toSet();
+      _userFieldsDiscovered = true;
+      return fields;
+    } catch (_) {
+      // Not cached, so a probe that failed on a dropped connection is retried
+      // rather than pinning the profile to the short list for the session.
+      return _fallbackUserFields;
+    }
+  }
+
+  /// Learns which `res.partner` fields this server defines, for the address
+  /// and phone rows.
+  ///
+  /// A failure leaves [_partnerFieldsDiscovered] false, which reads as
+  /// "unknown" rather than "absent" — the rows keep showing instead of all
+  /// vanishing on one dropped call — and the probe runs again next fetch.
+  Future<void> _ensurePartnerFieldsDiscovered() async {
+    if (_partnerFieldsDiscovered) return;
+    try {
+      _discoveredPartnerFields = (await _describeFields(
+        'res.partner',
+      )).keys.toSet();
+      _partnerFieldsDiscovered = _discoveredPartnerFields.isNotEmpty;
+    } catch (_) {
+      _discoveredPartnerFields = {};
+    }
+  }
+
+  /// Sets [_versionSaysMobileExists] from the connected release, cheaply and
+  /// without touching `res.partner`.
+  ///
+  /// Runs before [loadCachedUser] paints, which is exactly when it has to: the
+  /// real probe arrives no earlier than the network fetch, and the cached
+  /// profile paints well before that. In the gap, [hasMobileField] was null and
+  /// the screen's `?? true` default showed the Mobile row on every server,
+  /// Odoo 19 included, until the fetch caught up and hid it again.
+  Future<void> _primeMobileFieldVersionGuess() async {
+    final accountKey = await _accountKey();
+    if (_mobileFieldAccountKey != accountKey) {
+      _mobileFieldAccountKey = accountKey;
+      _mobileFieldResolved = false;
+      _partnerMobileFieldNameCache = null;
+      _mobileFieldModel = null;
+      _versionSaysMobileExists = null;
+    }
+    if (_versionSaysMobileExists != null || _mobileFieldResolved) return;
+    try {
+      final compat = await OdooCompat.current();
+      _versionSaysMobileExists = compat.hasMobileField;
+    } catch (_) {
+      // Left null: an unresolved guess falls through to the screen's own
+      // `?? true`, which is the behaviour this had before priming existed.
+    }
+  }
+
+  /// Resolves which field holds the mobile number and which model it lives on,
+  /// caching both.
+  ///
+  /// Odoo 19 removed `res.partner.mobile` and merged it into `phone`, so the
+  /// standard name is only probed on releases that still define it. Custom
+  /// names are checked after it, not before: on 16/17/18 the standard field is
+  /// where Odoo's own contact form puts the number, and a stray Studio field
+  /// must not shadow it.
+  Future<String?> _getPartnerMobileFieldName() async {
+    await _primeMobileFieldVersionGuess();
+    final accountKey = await _accountKey();
+    if (_mobileFieldAccountKey != accountKey) {
+      _mobileFieldAccountKey = accountKey;
+      _mobileFieldResolved = false;
+      _partnerMobileFieldNameCache = null;
+      _mobileFieldModel = null;
+      _versionSaysMobileExists = null;
+    }
+
+    if (_mobileFieldResolved) return _partnerMobileFieldNameCache;
+
+    final compat = await OdooCompat.current();
+    _versionSaysMobileExists = compat.hasMobileField;
+
+    try {
+      // `fields_get`, not a search on `ir.model.fields`: that model grants
+      // `base.group_user` no access at all on 16 through 19 — only
+      // `group_erp_manager` can read it — so probing it raised an AccessError
+      // for every non-admin, which is why the Mobile row behaved differently
+      // for admin than for an ordinary user on the same database.
+      final partnerFields = await _describeFields('res.partner');
+      final candidates = <String>[
+        if (compat.hasMobileField) 'mobile',
+        'mobile_phone',
+        'x_studio_mobile_phone',
+      ];
+      for (final name in candidates) {
+        if (partnerFields.containsKey(name)) {
+          _partnerMobileFieldNameCache = name;
+          _mobileFieldModel = 'res.partner';
+          _mobileFieldResolved = true;
+          return name;
+        }
+      }
+
+      // Odoo's own `hr` module puts `mobile_phone` on `res.users` — related to
+      // `hr.employee.mobile_phone` — not on `res.partner`, and Odoo's own
+      // Preferences form writes it there. On Odoo 19, where
+      // `res.partner.mobile` was removed, that is the only place a mobile
+      // number lives, so without this probe the row vanishes on a server that
+      // plainly has one. `mobile` itself is excluded: no supported release
+      // defines it on res.users.
+      final userFields = await _describeFields('res.users');
+      const userCandidates = ['mobile_phone', 'x_studio_mobile_phone'];
+      for (final name in userCandidates) {
+        final describe = userFields[name];
+        if (describe == null) continue;
+        // Existing is not enough when it is `hr`'s, which is related through
+        // `employee_id` — a computed m2o resolved as "the hr.employee whose
+        // user_id is me AND whose company_id is env.company". With no such
+        // employee it is an empty recordset and the related-field write
+        // targets nothing: the value is dropped with no error, which is
+        // exactly "I edit Mobile and nothing happens". Offering the row in
+        // that state offers an edit the server will silently discard.
+        //
+        // `continue`, not `break`: a rejected `mobile_phone` must not stop a
+        // plain stored `x_studio_mobile_phone` from being found.
+        if (_isEmployeeBacked(describe) && !await _hasLinkedEmployee()) {
+          continue;
+        }
+        _partnerMobileFieldNameCache = name;
+        _mobileFieldModel = 'res.users';
+        _mobileFieldResolved = true;
+        return name;
+      }
+
+      _partnerMobileFieldNameCache = null;
+      _mobileFieldModel = null;
+      _mobileFieldResolved = true;
+      return null;
+    } catch (_) {
+      // Not marked resolved — a probe that failed on a dropped connection must
+      // be retried. Until it succeeds the release's own answer stands, so
+      // 16/17/18 still write `mobile` and 19 still leaves it out.
+      _partnerMobileFieldNameCache = null;
+      _mobileFieldModel = null;
+      return compat.hasMobileField ? 'mobile' : null;
+    }
+  }
+
   Map<String, dynamic> _normalizePartnerUpdates(Map<String, dynamic> updates) {
     final out = <String, dynamic>{};
     updates.forEach((key, value) {
@@ -65,79 +572,21 @@ class ProfileProvider extends ChangeNotifier {
     return out;
   }
 
-  String? _partnerMobileFieldNameCache;
-  Future<String?> _getPartnerMobileFieldName() async {
-    if (_partnerMobileFieldNameCache != null)
-      return _partnerMobileFieldNameCache;
-    try {
-      /// Prefer custom 'mobile_phone' if present
-      final hasMobilePhone = await OdooSessionManager.callKwWithCompany({
-        'model': 'ir.model.fields',
-        'method': 'search_count',
-        'args': [
-          [
-            ['model', '=', 'res.partner'],
-            ['name', '=', 'mobile_phone'],
-          ],
-        ],
-        'kwargs': {},
-      });
-      final hasMp = (hasMobilePhone is int)
-          ? hasMobilePhone > 0
-          : (hasMobilePhone as num) > 0;
-      if (hasMp) {
-        _partnerMobileFieldNameCache = 'mobile_phone';
-        return _partnerMobileFieldNameCache;
-      }
-
-      final hasStudioMobilePhone = await OdooSessionManager.callKwWithCompany({
-        'model': 'ir.model.fields',
-        'method': 'search_count',
-        'args': [
-          [
-            ['model', '=', 'res.partner'],
-            ['name', '=', 'x_studio_mobile_phone'],
-          ],
-        ],
-        'kwargs': {},
-      });
-      final hasXs = (hasStudioMobilePhone is int)
-          ? hasStudioMobilePhone > 0
-          : (hasStudioMobilePhone as num) > 0;
-      if (hasXs) {
-        _partnerMobileFieldNameCache = 'x_studio_mobile_phone';
-        return _partnerMobileFieldNameCache;
-      }
-
-         final hasMobile = await OdooSessionManager.callKwWithCompany({
-        'model': 'ir.model.fields',
-        'method': 'search_count',
-        'args': [
-          [
-            ['model', '=', 'res.partner'],
-            ['name', '=', 'mobile'],
-          ],
-        ],
-        'kwargs': {},
-      });
-      final hasM = (hasMobile is int) ? hasMobile > 0 : (hasMobile as num) > 0;
-      _partnerMobileFieldNameCache = hasM ? 'mobile' : null;
-      return _partnerMobileFieldNameCache;
-    } catch (_) {
-      /// On failure, don't assume a field; we'll fallback to using phone for UI
-      _partnerMobileFieldNameCache = null;
-      return _partnerMobileFieldNameCache;
-    }
-  }
-
+  /// Renames the canonical `mobile` key to whatever `res.partner` field this
+  /// server actually has, or drops it when there is none.
   Future<Map<String, dynamic>> _preparePartnerUpdatesForServer(
     Map<String, dynamic> normalized,
   ) async {
-    /// Map our internal 'mobile' to whichever field server supports
     if (!normalized.containsKey('mobile')) return normalized;
     final fieldName = await _getPartnerMobileFieldName();
-    if (fieldName == null) {
-        final copy = Map<String, dynamic>.from(normalized);
+    // Usable here only when it actually lives on res.partner. It can just as
+    // well be `hr`'s res.users.mobile_phone — renaming to that and sending it
+    // to res.partner makes Odoo reject the whole write for an unrecognized
+    // field, taking phone/website/function down with it. Dropping the key
+    // loses one value; keeping it loses all. (saveProfileEdits already routes
+    // the res.users case away from here, but updatePartnerFields is public.)
+    if (fieldName == null || _mobileFieldModel != 'res.partner') {
+      final copy = Map<String, dynamic>.from(normalized);
       copy.remove('mobile');
       return copy;
     }
@@ -148,69 +597,24 @@ class ProfileProvider extends ChangeNotifier {
     return copy;
   }
 
-  /// Update multiple contact fields at once (on res.partner)
-  Future<void> updatePartnerFields(Map<String, dynamic> updates) async {
-    try {
-      if (_userData == null) return;
-
-      final partnerId = _userData!['partner_id'];
-      if (partnerId == null || partnerId is! List || partnerId.isEmpty) {
-        throw Exception('Partner ID not found');
-      }
-
-      /// Ensure keys are normalized before any processing
-      final normalized = _normalizePartnerUpdates(updates);
-
-      /// Offline-first: if no internet, queue changes and apply locally
-      if (!_hasInternet) {
-        _mergeInto(_pendingPartnerUpdates, normalized);
-        await _savePendingUpdates();
-        await _applyLocalUserUpdates(normalized);
-        return;
-      }
-
-      final toSend = await _preparePartnerUpdatesForServer(normalized);
-      await OdooSessionManager.callKwWithCompany({
-        'model': 'res.partner',
-        'method': 'write',
-        'args': [
-          [partnerId[0]],
-          toSend,
-        ],
-        'kwargs': {},
-      });
-
-      await fetchUserProfile(forceRefresh: true);
-    } catch (e) {
-      // Queue on error and update local cache for smooth UX
-      final normalized = _normalizePartnerUpdates(updates);
-      _mergeInto(_pendingPartnerUpdates, normalized);
-      await _savePendingUpdates();
-      await _applyLocalUserUpdates(normalized);
-         }
-  }
-
   Future<void> initialize() async {
     _startConnectivityListener();
     await loadCachedUser();
-    await _loadPendingUpdates();
     await fetchUserProfile();
     await loadCountries();
   }
 
   void _startConnectivityListener() {
-    _connectivitySub = Connectivity().onConnectivityChanged.listen((
+    // Subscribed once: this runs every time the Profile screen opens, and a
+    // new subscription per visit would pile up for the life of the app.
+    _connectivitySub ??= Connectivity().onConnectivityChanged.listen((
       results,
     ) async {
       final hasNet = await _checkInternet();
       _hasInternet = hasNet;
       notifyListeners();
-      if (hasNet) {
-        await _processPendingUpdates();
-      }
     });
 
-    // Initial check
     _checkInternet().then((hasNet) {
       _hasInternet = hasNet;
       notifyListeners();
@@ -227,24 +631,31 @@ class ProfileProvider extends ChangeNotifier {
   }
 
   Future<void> loadCachedUser() async {
+    // Ahead of the paint below, not after it — see
+    // [_primeMobileFieldVersionGuess] for why the ordering is the point.
+    await _primeMobileFieldVersionGuess();
     try {
+      final key = await _cacheKey();
+      if (key == null) return;
       final prefs = await SharedPreferences.getInstance();
-      final cached = prefs.getString(_cacheKeyUser);
+      final cached = prefs.getString(key);
       if (cached != null && cached.isNotEmpty) {
         final data = jsonDecode(cached) as Map<String, dynamic>;
         _userData = data;
-        final img = data['image_1920'];
-        if (img != null && img is String && img.isNotEmpty && img != 'false') {
+        final img = OdooBinary.base64(data['image_1920']);
+        if (img != null) {
           try {
+            _userAvatar = await compute(decodeBase64ToBytes, img);
           } catch (_) {}
         }
         _isLoading = false;
         notifyListeners();
       }
-    } catch (e) {
-      }
+    } catch (_) {}
   }
 
+  /// [forceRefresh] is accepted for existing callers; every call reads the
+  /// server.
   Future<void> fetchUserProfile({bool forceRefresh = false}) async {
     if (_userData == null) {
       _isLoading = true;
@@ -254,85 +665,121 @@ class ProfileProvider extends ChangeNotifier {
 
     try {
       final session = await OdooSessionManager.getCurrentSession();
-      if (session == null || session.userId == null) {
+      if (session == null) {
         _isLoading = false;
         notifyListeners();
         return;
       }
 
+      Future<dynamic> readUser(List<String> fields) =>
+          OdooSessionManager.callKwWithCompany({
+            'model': 'res.users',
+            'method': 'read',
+            'args': [
+              [session.userId],
+              fields,
+            ],
+            'kwargs': {},
+          });
 
-      /// Read basic user fields from res.users (exclude unsupported fields like 'mobile')
-      final res = await OdooSessionManager.callKwWithCompany({
-        'model': 'res.users',
-        'method': 'read',
-        'args': [
-          [session.userId],
-          [
-            'name',
-            'login',
-            'email',
-              'website',
-            'function',
-            'image_1920',
-            'company_id',
-            'partner_id',
-          ],
-        ],
-        'kwargs': {},
-      });
+      final wanted = await _resolveProfileFields();
+      dynamic res;
+      try {
+        res = await readUser(wanted);
+      } catch (_) {
+        // A single misbehaving field must not cost the whole profile. Some
+        // modules add non-stored computed fields to res.users whose compute
+        // needs rights an ordinary user does not have, and `fields_get` cannot
+        // see that coming — so the wide read is retried once as the short list
+        // that is known to work on every release.
+        _profileUserFieldsCache = null;
+        res = await readUser(_fallbackUserFields);
+      }
 
       if (res is List && res.isNotEmpty) {
         final data = res.first as Map<String, dynamic>;
+        // Base64 text through Odoo 19, a {content, size} object on 20. Reduced
+        // to the text here, once, so the cached profile, the app bar and the
+        // profile screen all read the same thing on every release.
+        data['image_1920'] = OdooBinary.base64(data['image_1920']) ?? false;
 
-        /// If partner is linked, fetch phone/mobile from res.partner and merge for UI compatibility
         final partner = data['partner_id'];
         if (partner != null && partner is List && partner.isNotEmpty) {
           try {
-            /// Determine which mobile field exists to avoid invalid field errors
             final mobileFieldName = await _getPartnerMobileFieldName();
-            final fields = <String>[
-              'phone',
-              'street',
-              'city',
-              'zip',
-              'state_id',
-              'country_id',
-            ];
-            if (mobileFieldName != null) fields.add(mobileFieldName);
+            // `hr`'s res.users.mobile_phone is the common case here on 19.
+            final mobileOnUsers = _mobileFieldModel == 'res.users';
+            final phoneFieldName = await _getPhoneFieldName();
+            final phoneOnUsers = _phoneFieldModel == 'res.users';
 
-            final partnerRes = await OdooSessionManager.callKwWithCompany({
-              'model': 'res.partner',
-              'method': 'read',
-              'args': [
-                [partner[0]],
-                fields,
-              ],
-              'kwargs': {},
-            });
-
-            if (partnerRes is List && partnerRes.isNotEmpty) {
-              final partnerData = partnerRes.first as Map<String, dynamic>;
-              /// Merge phone/mobile (and a few address fields if needed by UI)
-              data['phone'] = partnerData['phone'];
-              /// Derive unified 'mobile' for UI using whichever field exists
-              String? mobileValue;
-              if (mobileFieldName != null) {
-                final mv = partnerData[mobileFieldName];
-                if (mv != null && mv.toString().isNotEmpty && mv != 'false') {
-                  mobileValue = mv.toString();
-                }
-              }
-              /// If server has no mobile field, keep empty so UI treats it as separate and editable
-              data['mobile'] = mobileValue ?? '';
-              data['street'] = partnerData['street'];
-              data['city'] = partnerData['city'];
-              data['zip'] = partnerData['zip'];
-              data['state_id'] = partnerData['state_id'];
-              data['country_id'] = partnerData['country_id'];
+            // Only the fields this server defines: Odoo rejects the entire
+            // read for one unrecognized name, which would take the address
+            // and phone down with it.
+            final fields = _partnerFieldsDiscovered
+                ? _wantedPartnerFields
+                      .where(_discoveredPartnerFields.contains)
+                      .toList()
+                : List<String>.from(_wantedPartnerFields);
+            // Added only when they really live on res.partner: asking this
+            // read for a res.users-only name would fail the whole call.
+            if (mobileFieldName != null && !mobileOnUsers) {
+              fields.add(mobileFieldName);
             }
-          } catch (e) {
+            if (phoneFieldName != null && !phoneOnUsers) {
+              fields.add(phoneFieldName);
+            }
 
-          }
+            if (fields.isNotEmpty) {
+              final partnerRes = await OdooSessionManager.callKwWithCompany({
+                'model': 'res.partner',
+                'method': 'read',
+                'args': [
+                  [partner[0]],
+                  fields,
+                ],
+                'kwargs': {},
+              });
+
+              if (partnerRes is List && partnerRes.isNotEmpty) {
+                final partnerData = partnerRes.first as Map<String, dynamic>;
+                for (final field in fields) {
+                  data[field] = partnerData[field];
+                }
+
+                String? mobileValue;
+                if (mobileFieldName != null) {
+                  if (mobileOnUsers) {
+                    // Its own read — see [_readUserFieldValue] for why that
+                    // is what makes it readable for a non-HR user.
+                    mobileValue = await _readUserFieldValue(mobileFieldName);
+                  } else {
+                    // Odoo sends an empty value as the bool `false`, so the
+                    // comparison has to be on the rendered text — comparing
+                    // the raw value to 'false' never matches a bool and
+                    // stored the literal string "false".
+                    final text = partnerData[mobileFieldName]?.toString() ?? '';
+                    if (text.isNotEmpty && text != 'false') {
+                      mobileValue = text;
+                    }
+                  }
+                }
+                data['mobile'] = mobileValue ?? '';
+
+                String? phoneValue;
+                if (phoneFieldName != null) {
+                  if (phoneOnUsers) {
+                    phoneValue = await _readUserFieldValue(phoneFieldName);
+                  } else {
+                    final text = partnerData[phoneFieldName]?.toString() ?? '';
+                    if (text.isNotEmpty && text != 'false') {
+                      phoneValue = text;
+                    }
+                  }
+                }
+                data['phone'] = phoneValue ?? '';
+              }
+            }
+          } catch (_) {}
         }
 
         _userData = data;
@@ -341,232 +788,204 @@ class ProfileProvider extends ChangeNotifier {
           try {
             _userAvatar = base64Decode(img);
           } catch (_) {}
+        } else {
+          // A removed photo must not keep showing the old one here or in the
+          // app bar, which both read this.
+          _userAvatar = null;
         }
 
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_cacheKeyUser, jsonEncode(data));
+        final key = await _cacheKey();
+        if (key != null) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(key, jsonEncode(data));
+        }
+
+        // Keeps the Switch Account list's cached name/avatar for this
+        // account in step with the profile, which otherwise only picks up
+        // an edit on the next full login — every fetch here re-syncs it
+        // (not just a save), so opening the profile screen after editing
+        // elsewhere also catches it up.
+        final nameValue = data['name'];
+        await SessionService.instance.updateCurrentAccountDisplay(
+          name:
+              (nameValue is String &&
+                  nameValue.isNotEmpty &&
+                  nameValue != 'false')
+              ? nameValue
+              : null,
+          imageBase64: (img is String && img.isNotEmpty && img != 'false')
+              ? img
+              : null,
+        );
       }
     } catch (e) {
       _error = 'Failed to fetch user profile: $e';
-       } finally {
+    } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  Future<void> loadCountries() async {
-    _isLoadingCountries = true;
-    notifyListeners();
+  /// Applies profile edits, routing every field to the model that owns it on
+  /// the connected server.
+  ///
+  /// `res.users.write` bypasses access rights only when *every* key is
+  /// self-writeable, so the split is per-release rather than fixed: Odoo 19
+  /// takes `phone` there too, 16/17/18 must send it to `res.partner`.
+  ///
+  /// `mobile` cannot be classified from that release-based set at all — which
+  /// model owns it depends on this server's schema — so it is routed
+  /// separately, using the resolved field name whenever that lives on
+  /// `res.users`.
+  ///
+  /// Throws if the server rejects either write, so the caller can tell the user
+  /// the change did not stick.
+  Future<void> saveProfileEdits(Map<String, dynamic> changes) async {
+    if (changes.isEmpty) return;
+
+    final compat = await OdooCompat.current();
+    final selfWritable = compat.userSelfWritableFields;
+
+    final userUpdates = <String, dynamic>{};
+    final partnerUpdates = <String, dynamic>{};
+
+    final remaining = Map<String, dynamic>.from(changes);
+    if (remaining.containsKey('mobile')) {
+      // Never classified by the release-based set: which model owns it depends
+      // on this server's schema — a plain res.partner.mobile, `hr`'s
+      // res.users.mobile_phone, a Studio field, or nothing at all.
+      final value = remaining.remove('mobile');
+      await _getPartnerMobileFieldName();
+      final resolvedField = _partnerMobileFieldNameCache;
+      if (_mobileFieldModel == 'res.users' && resolvedField != null) {
+        userUpdates[resolvedField] = value;
+      } else {
+        // res.partner, or unresolved: `_preparePartnerUpdatesForServer`
+        // renames or drops it per this server's schema.
+        partnerUpdates['mobile'] = value;
+      }
+    }
+
+    // Same treatment as mobile, and for the same reason: `hr`'s
+    // res.users.work_phone and res.partner.phone are different fields holding
+    // different numbers, so the release-based set cannot decide this either.
+    if (remaining.containsKey('phone')) {
+      final value = remaining.remove('phone');
+      final resolvedPhone = await _getPhoneFieldName();
+      if (_phoneFieldModel == 'res.users' && resolvedPhone != null) {
+        userUpdates[resolvedPhone] = value;
+      } else if (resolvedPhone != null) {
+        partnerUpdates[resolvedPhone] = value;
+      }
+    }
+
+    remaining.forEach((field, value) {
+      if (selfWritable.contains(field)) {
+        userUpdates[field] = value;
+      } else {
+        partnerUpdates[field] = value;
+      }
+    });
 
     try {
-      _countries = await fetchCountries();
-    } catch (e) {
-      } finally {
-      _isLoadingCountries = false;
-      notifyListeners();
+      if (userUpdates.isNotEmpty) {
+        await _writeUserFields(userUpdates);
+      }
+      if (partnerUpdates.isNotEmpty) {
+        await _writePartnerFields(partnerUpdates);
+      }
+    } finally {
+      // One refetch for the whole save rather than one per model — a refetch
+      // between the two writes would paint a half-applied profile. In a
+      // `finally` because a save can be *partly* applied: the res.users write
+      // commits before a failing res.partner write, and without this the
+      // screen would keep showing the old name, re-send it on every retry,
+      // and never agree with the server.
+      await fetchUserProfile();
     }
   }
 
-  Future<List<Map<String, dynamic>>> fetchCountries() async {
-    try {
-      final result = await OdooSessionManager.callKwWithCompany({
-        'model': 'res.country',
-        'method': 'search_read',
-        'args': [],
-        'kwargs': {
-          'fields': ['id', 'name', 'code'],
-          'order': 'name ASC',
-        },
-      });
-      return result is List ? result.cast<Map<String, dynamic>>() : [];
-    } catch (e) {
-       rethrow;
+  Future<void> _writeUserFields(Map<String, dynamic> updates) async {
+    final session = await OdooSessionManager.getCurrentSession();
+    if (session == null) {
+      throw Exception('No active session');
     }
+    await OdooSessionManager.callKwWithCompany({
+      'model': 'res.users',
+      'method': 'write',
+      'args': [
+        [session.userId],
+        updates,
+      ],
+      'kwargs': {},
+    });
   }
 
-  Future<void> loadStates(int countryId) async {
-    _isLoadingStates = true;
-    notifyListeners();
-
-    try {
-      _states = await fetchStates(countryId);
-    } catch (e) {
-     } finally {
-      _isLoadingStates = false;
-      notifyListeners();
+  Future<void> _writePartnerFields(Map<String, dynamic> updates) async {
+    final partnerId = _userData?['partner_id'];
+    if (partnerId == null || partnerId is! List || partnerId.isEmpty) {
+      throw Exception('Partner ID not found');
     }
+    final toSend = await _preparePartnerUpdatesForServer(
+      _normalizePartnerUpdates(updates),
+    );
+    if (toSend.isEmpty) return;
+    await OdooSessionManager.callKwWithCompany({
+      'model': 'res.partner',
+      'method': 'write',
+      'args': [
+        [partnerId[0]],
+        toSend,
+      ],
+      'kwargs': {},
+    });
   }
 
-  Future<List<Map<String, dynamic>>> fetchStates(int countryId) async {
-    try {
-      final result = await OdooSessionManager.callKwWithCompany({
-        'model': 'res.country.state',
-        'method': 'search_read',
-        'args': [
-          [
-            ['country_id', '=', countryId],
-          ],
-        ],
-        'kwargs': {
-          'fields': ['id', 'name', 'code'],
-          'order': 'name ASC',
-        },
-      });
-      return result is List ? result.cast<Map<String, dynamic>>() : [];
-    } catch (e) {
-       rethrow;
-    }
+  Future<void> updateProfileFields(Map<String, dynamic> updates) async {
+    await _writeUserFields(updates);
+    await fetchUserProfile();
+  }
+
+  Future<void> updatePartnerFields(Map<String, dynamic> updates) async {
+    await _writePartnerFields(updates);
+    await fetchUserProfile();
   }
 
   Future<void> updateProfileImage(String base64Image) async {
-    try {
-      final session = await OdooSessionManager.getCurrentSession();
-      if (session == null || session.userId == null) return;
-
-      /// Offline-first: queue and apply locally
-      if (!_hasInternet) {
-        _pendingUserUpdates['image_1920'] = base64Image;
-        await _savePendingUpdates();
-        /// Apply locally for instant UI
-        try {
-          _userAvatar = base64Decode(base64Image);
-        } catch (_) {}
-        _userData ??= {};
-        _userData!['image_1920'] = base64Image;
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_cacheKeyUser, jsonEncode(_userData));
-        notifyListeners();
-        return;
-      }
-
-      await OdooSessionManager.callKwWithCompany({
-        'model': 'res.users',
-        'method': 'write',
-        'args': [
-          [session.userId],
-          {'image_1920': base64Image},
-        ],
-        'kwargs': {},
-      });
-
-      await fetchUserProfile(forceRefresh: true);
-    } catch (e) {
-      /// Queue on failure too
-      _pendingUserUpdates['image_1920'] = base64Image;
-      await _savePendingUpdates();
-      try {
-        _userAvatar = base64Decode(base64Image);
-      } catch (_) {}
-      _userData ??= {};
-      _userData!['image_1920'] = base64Image;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_cacheKeyUser, jsonEncode(_userData));
-      notifyListeners();
-      }
+    await _writeUserFields({'image_1920': base64Image});
+    await fetchUserProfile();
   }
 
-  Future<void> updateProfileField(String field, dynamic value) async {
-    try {
-      if (_userData == null) return;
-
-      final partnerId = _userData!['partner_id'];
-      if (partnerId == null || partnerId is! List || partnerId.isEmpty) {
-        throw Exception('Partner ID not found');
-      }
-
-      await OdooSessionManager.callKwWithCompany({
-        'model': 'res.partner',
-        'method': 'write',
-        'args': [
-          [partnerId[0]],
-          {field: value},
-        ],
-        'kwargs': {},
-      });
-
-      await fetchUserProfile(forceRefresh: true);
-    } catch (e) {
-      _error = 'Failed to update $field: $e';
-      rethrow;
-    }
-  }
-
+  /// Writes the address as one payload. Only the fields this server defines are
+  /// sent, so a release that dropped one of them does not fail the whole write.
   Future<void> updateAddressFields(Map<String, dynamic> addressData) async {
-    try {
-      if (_userData == null) return;
+    final partnerId = _userData?['partner_id'];
+    if (partnerId == null || partnerId is! List || partnerId.isEmpty) {
+      throw Exception('Partner ID not found');
+    }
 
-      final partnerId = _userData!['partner_id'];
-      if (partnerId == null || partnerId is! List || partnerId.isEmpty) {
-        throw Exception('Partner ID not found');
-      }
+    final toSend = <String, dynamic>{};
+    addressData.forEach((field, value) {
+      if (isProfileFieldAvailable(field)) toSend[field] = value;
+    });
+    if (toSend.isEmpty) return;
 
-      /// Offline-first: queue and apply locally if no internet
-      if (!_hasInternet) {
-        _mergeInto(_pendingPartnerUpdates, addressData);
-        await _savePendingUpdates();
-        await _applyLocalUserUpdates(addressData);
-        return;
-      }
+    await OdooSessionManager.callKwWithCompany({
+      'model': 'res.partner',
+      'method': 'write',
+      'args': [
+        [partnerId[0]],
+        toSend,
+      ],
+      'kwargs': {},
+    });
 
-      await OdooSessionManager.callKwWithCompany({
-        'model': 'res.partner',
-        'method': 'write',
-        'args': [
-          [partnerId[0]],
-          addressData,
-        ],
-        'kwargs': {},
-      });
-
-      await fetchUserProfile(forceRefresh: true);
-    } catch (e) {
-      /// Queue on failure and update local cache
-      _mergeInto(_pendingPartnerUpdates, addressData);
-      await _savePendingUpdates();
-      await _applyLocalUserUpdates(addressData);
-      }
+    await fetchUserProfile();
   }
 
-  /// Update multiple profile fields at once (on res.users)
-  Future<void> updateProfileFields(Map<String, dynamic> updates) async {
-    try {
-      final session = await OdooSessionManager.getCurrentSession();
-      if (session == null || session.userId == null) {
-        throw Exception('No active session');
-      }
-
-      if (!_hasInternet) {
-        _mergeInto(_pendingUserUpdates, updates);
-        await _savePendingUpdates();
-        await _applyLocalUserUpdates(updates);
-        return;
-      }
-
-      await OdooSessionManager.callKwWithCompany({
-        'model': 'res.users',
-        'method': 'write',
-        'args': [
-          [session.userId],
-          updates,
-        ],
-        'kwargs': {},
-      });
-
-      await fetchUserProfile(forceRefresh: true);
-    } catch (e) {
-      /// Queue on error and update local cache for smooth UX
-      _mergeInto(_pendingUserUpdates, updates);
-      await _savePendingUpdates();
-      await _applyLocalUserUpdates(updates);
-       }
-  }
-
-  /// Load the related company (parent_id) for the user's partner
   Future<Map<String, dynamic>?> loadRelatedCompany() async {
     try {
-      if (_userData == null) return null;
-
-      final partnerId = _userData!['partner_id'];
+      final partnerId = _userData?['partner_id'];
       if (partnerId == null || partnerId is! List || partnerId.isEmpty) {
         return null;
       }
@@ -594,17 +1013,14 @@ class ProfileProvider extends ChangeNotifier {
         }
       }
       return null;
-    } catch (e) {
-       return null;
+    } catch (_) {
+      return null;
     }
   }
 
-  /// Update the related company (parent_id) for the user's partner
   Future<void> updateRelatedCompany(int? companyId) async {
     try {
-      if (_userData == null) return;
-
-      final partnerId = _userData!['partner_id'];
+      final partnerId = _userData?['partner_id'];
       if (partnerId == null || partnerId is! List || partnerId.isEmpty) {
         throw Exception('Partner ID not found');
       }
@@ -619,14 +1035,75 @@ class ProfileProvider extends ChangeNotifier {
         'kwargs': {},
       });
 
-      await fetchUserProfile(forceRefresh: true);
+      await fetchUserProfile();
     } catch (e) {
       _error = 'Failed to update related company: $e';
-       rethrow;
+      rethrow;
     }
   }
 
-  /// Format address fields into a single display string
+  Future<void> loadCountries() async {
+    _isLoadingCountries = true;
+    notifyListeners();
+
+    try {
+      _countries = await fetchCountries();
+    } catch (_) {} finally {
+      _isLoadingCountries = false;
+      notifyListeners();
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchCountries() async {
+    try {
+      final result = await OdooSessionManager.callKwWithCompany({
+        'model': 'res.country',
+        'method': 'search_read',
+        'args': [],
+        'kwargs': {
+          'fields': ['id', 'name', 'code'],
+          'order': 'name ASC',
+        },
+      });
+      return result is List ? result.cast<Map<String, dynamic>>() : [];
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  Future<void> loadStates(int countryId) async {
+    _isLoadingStates = true;
+    notifyListeners();
+
+    try {
+      _states = await fetchStates(countryId);
+    } catch (_) {} finally {
+      _isLoadingStates = false;
+      notifyListeners();
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchStates(int countryId) async {
+    try {
+      final result = await OdooSessionManager.callKwWithCompany({
+        'model': 'res.country.state',
+        'method': 'search_read',
+        'args': [
+          [
+            ['country_id', '=', countryId],
+          ],
+        ],
+        'kwargs': {
+          'fields': ['id', 'name', 'code'],
+          'order': 'name ASC',
+        },
+      });
+      return result is List ? result.cast<Map<String, dynamic>>() : [];
+    } catch (_) {
+      rethrow;
+    }
+  }
+
   String formatAddress(Map<String, dynamic> data) {
     final parts = [
       if (data['street'] != null &&
@@ -682,7 +1159,6 @@ class ProfileProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  /// Reset provider state to initial values (called when cache is cleared)
   void resetState() {
     _isLoading = true;
     _userData = null;
@@ -693,105 +1169,26 @@ class ProfileProvider extends ChangeNotifier {
     _states = [];
     _isLoadingCountries = false;
     _isLoadingStates = false;
+
+    // This provider outlives the account, so every schema answer resolved
+    // against the old server has to go with it.
+    _profileUserFieldsCache = null;
+    _profileFieldsAccountKey = null;
+    _discoveredUserFields = {};
+    _discoveredPartnerFields = {};
+    _userFieldsDiscovered = false;
+    _partnerFieldsDiscovered = false;
+    _partnerMobileFieldNameCache = null;
+    _mobileFieldModel = null;
+    _mobileFieldAccountKey = null;
+    _mobileFieldResolved = false;
+    _versionSaysMobileExists = null;
+    _phoneFieldName = null;
+    _phoneFieldModel = null;
+    _phoneFieldAccountKey = null;
+    _phoneFieldResolved = false;
+    OdooVersion.reset();
+
     notifyListeners();
-   }
-
-  /// Expose sync status and manual trigger for UI
-  bool get hasPendingUpdates =>
-      _pendingUserUpdates.isNotEmpty || _pendingPartnerUpdates.isNotEmpty;
-
-  Future<void> processPendingUpdates() => _processPendingUpdates();
-
-  void _mergeInto(Map<String, dynamic> target, Map<String, dynamic> src) {
-    for (final e in src.entries) {
-      target[e.key] = e.value;
-    }
-  }
-
-  Future<void> _loadPendingUpdates() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final u = prefs.getString(_cacheKeyPendingUserUpdates);
-      final p = prefs.getString(_cacheKeyPendingPartnerUpdates);
-      if (u != null && u.isNotEmpty) {
-        _pendingUserUpdates = Map<String, dynamic>.from(jsonDecode(u));
-      }
-      if (p != null && p.isNotEmpty) {
-        _pendingPartnerUpdates = Map<String, dynamic>.from(jsonDecode(p));
-      }
-    } catch (e) {
-      }
-  }
-
-  Future<void> _savePendingUpdates() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _cacheKeyPendingUserUpdates,
-        jsonEncode(_pendingUserUpdates),
-      );
-      await prefs.setString(
-        _cacheKeyPendingPartnerUpdates,
-        jsonEncode(_pendingPartnerUpdates),
-      );
-    } catch (e) {
-      }
-  }
-
-  Future<void> _processPendingUpdates() async {
-    if (_pendingUserUpdates.isEmpty && _pendingPartnerUpdates.isEmpty) return;
-    try {
-      final session = await OdooSessionManager.getCurrentSession();
-      if (session == null || session.userId == null) return;
-
-      if (_pendingUserUpdates.isNotEmpty) {
-        await OdooSessionManager.callKwWithCompany({
-          'model': 'res.users',
-          'method': 'write',
-          'args': [
-            [session.userId],
-            _pendingUserUpdates,
-          ],
-          'kwargs': {},
-        });
-        _pendingUserUpdates.clear();
-      }
-
-      /// Apply partner pending
-      if (_userData != null && _pendingPartnerUpdates.isNotEmpty) {
-        final partnerId = _userData!['partner_id'];
-        if (partnerId is List && partnerId.isNotEmpty) {
-           final normalized = _normalizePartnerUpdates(_pendingPartnerUpdates);
-          final toSend = await _preparePartnerUpdatesForServer(normalized);
-          await OdooSessionManager.callKwWithCompany({
-            'model': 'res.partner',
-            'method': 'write',
-            'args': [
-              [partnerId[0]],
-              toSend,
-            ],
-            'kwargs': {},
-          });
-          _pendingPartnerUpdates.clear();
-        }
-      }
-
-      await _savePendingUpdates();
-      await fetchUserProfile(forceRefresh: true);
-    } catch (e) {
-      }
-  }
-
-  Future<void> _applyLocalUserUpdates(Map<String, dynamic> updates) async {
-    try {
-      if (_userData == null) return;
-      updates.forEach((key, value) {
-        _userData![key] = value;
-      });
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_cacheKeyUser, jsonEncode(_userData));
-      notifyListeners();
-    } catch (e) {
-     }
   }
 }

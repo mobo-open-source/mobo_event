@@ -47,7 +47,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // TODO: switch back to signingConfigs.getByName("release") once android/key.properties
+            // and a real release keystore are in place — debug signing is a temporary stand-in.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }

@@ -32,7 +32,7 @@ class RegistrationPage extends StatelessWidget {
           ),
         ),
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        foregroundColor: isDark ? Colors.white : Theme.of(context).primaryColor,
+        foregroundColor: Theme.of(context).primaryColor,
         elevation: 0,
         centerTitle: false,
         surfaceTintColor: Colors.transparent,
@@ -41,8 +41,3 @@ class RegistrationPage extends StatelessWidget {
     );
   }
 }
-
-
-
-
-

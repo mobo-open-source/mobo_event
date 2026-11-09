@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../features/login/pages/server_setup_screen.dart';
 import '../../features/login/pages/credentials_screen.dart';
-import '../../features/login/pages/add_account_screen.dart';
 import '../../features/login/pages/app_lock_screen.dart';
 import '../../features/login/pages/reset_password_screen.dart';
 import '../../app/app_entry.dart';
@@ -10,6 +9,7 @@ import '../../features/profile/pages/profile_screen.dart';
 import '../../features/settings/pages/settings_screen.dart';
 
 import 'app_routes.dart';
+import '../../core/theme/app_theme.dart';
 
 /// Generates routes for the application.
 ///
@@ -24,11 +24,9 @@ class RouteGenerator {
   /// Returns a [MaterialPageRoute] for the requested route, or an error
   /// route if the route name is not recognized.
   static Route<dynamic> generateRoute(RouteSettings settings) {
-    /// Extract arguments if any
     final args = settings.arguments;
 
     switch (settings.name) {
-
       case AppRoutes.serverSetup:
         return MaterialPageRoute(
           builder: (_) => const ServerSetupScreen(),
@@ -36,7 +34,8 @@ class RouteGenerator {
         );
 
       case AppRoutes.login:
-        /// Login requires URL and database arguments
+
+        // Login requires URL and database arguments
         if (args is Map<String, dynamic>) {
           return MaterialPageRoute(
             builder: (_) => CredentialsScreen(
@@ -46,20 +45,15 @@ class RouteGenerator {
             settings: settings,
           );
         }
-        /// Fallback if arguments are missing
+
         return MaterialPageRoute(
           builder: (_) => const CredentialsScreen(url: '', database: ''),
           settings: settings,
         );
 
-      case AppRoutes.addAccount:
-        return MaterialPageRoute(
-          builder: (_) => const AddAccountScreen(),
-          settings: settings,
-        );
-
       case AppRoutes.appLock:
-        /// App lock requires onAuthenticationSuccess callback
+
+        // App lock requires onAuthenticationSuccess callback
         if (args is Map<String, dynamic>) {
           return MaterialPageRoute(
             builder: (_) => AppLockScreen(
@@ -86,8 +80,6 @@ class RouteGenerator {
           settings: settings,
         );
 
-
-
       case AppRoutes.profile:
         return MaterialPageRoute(
           builder: (_) => const ProfileScreen(),
@@ -101,7 +93,6 @@ class RouteGenerator {
         );
 
       default:
-        /// Return error route for undefined routes
         return MaterialPageRoute(
           builder: (_) => _ErrorRoute(routeName: settings.name ?? 'Unknown'),
           settings: settings,
@@ -120,13 +111,18 @@ class _ErrorRoute extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Error')),
+      // Scrolls rather than overflowing when the window is short (landscape).
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.error_outline, size: 80, color: Colors.red),
+              const Icon(
+                Icons.error_outline,
+                size: 80,
+                color: StatusColors.red,
+              ),
               const SizedBox(height: 24),
               const Text(
                 'Route Not Found',

@@ -26,11 +26,17 @@ class FullImageScreen extends StatelessWidget {
         ),
         title: Text(title, style: const TextStyle(color: Colors.white)),
       ),
-      body: Center(
-        child: InteractiveViewer(
-          minScale: 0.5,
-          maxScale: 4.0,
-          child: Image.memory(imageBytes, fit: BoxFit.contain),
+      // Left and right only, so a notch on a phone in landscape doesn't sit
+      // over the edge of the picture (both are zero in portrait).
+      body: SafeArea(
+        top: false,
+        bottom: false,
+        child: Center(
+          child: InteractiveViewer(
+            minScale: 0.5,
+            maxScale: 4.0,
+            child: Image.memory(imageBytes, fit: BoxFit.contain),
+          ),
         ),
       ),
     );

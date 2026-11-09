@@ -22,11 +22,9 @@ class _ConnectionStatusBannerState extends State<ConnectionStatusBanner> {
     super.initState();
     _internetStream = ConnectivityService.instance.onInternetChanged;
     _serverStream = ConnectivityService.instance.onServerChanged;
-    ///seed initial values asynchronously
     ConnectivityService.instance.hasInternetAccess().then((v) {
       if (mounted) setState(() => _online = v);
     });
-    /// server seed uses lastKnownServerReachable
     _serverReachable = ConnectivityService.instance.lastKnownServerReachable;
   }
 
@@ -43,9 +41,7 @@ class _ConnectionStatusBannerState extends State<ConnectionStatusBanner> {
           initialData: _serverReachable,
           builder: (context, serverSnap) {
             final serverOk = serverSnap.data ?? true;
-            /// If fully OK, hide
             if (online && serverOk) return const SizedBox();
-            /// Choose message/state
             final bool showOffline = !online;
             final String message = showOffline
                 ? "You're offline. Check your internet connection."

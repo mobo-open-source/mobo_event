@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
+import '../../../core/theme/app_theme.dart';
 
 class LoadingWidget extends StatelessWidget {
   const LoadingWidget({
@@ -45,24 +46,21 @@ class LoadingWidget extends StatelessWidget {
 
     if (!overlay) return loader;
 
-    /// Overlay mode: dimmed barrier with a card, similar to LoadingDialog
     return Stack(
       children: [
-        /// Barrier
         Semantics(
           container: true,
           label: 'Loading overlay',
           child: ModalBarrier(
             dismissible: barrierDismissible,
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha: 0.2),
           ),
         ),
-        /// Centered card
         Center(
           child: Card(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            elevation: 8,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            color: isDark ? AppTheme.darkSurface : Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
               child: Column(
@@ -115,7 +113,6 @@ class LoadingWidget extends StatelessWidget {
 
   Widget _buildAnimated(Color resolvedColor, bool isDark) {
     if (reduceMotion) {
-      /// Static, low-motion fallback
       return Icon(Icons.hourglass_empty_rounded, color: resolvedColor, size: size);
     }
 

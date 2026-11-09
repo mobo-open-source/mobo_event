@@ -1,25 +1,17 @@
 import 'package:mobo_event/features/ticket/model/ticket_prd.dart';
 
 import '../../../core/services/odoo_session_manager.dart';
+import '../../../core/utils/odoo_compat.dart';
 
 class TicketServices {
-
 
   /// Fetch ticket products for an event
   Future fetchTicketProduct({String? search, int limit = 3}) async {
     try {
-      final session = await OdooSessionManager.getCurrentSession();
-
-      final version = session!.odooSession.serverVersion;
-
-      String odooVersion = version;
-
-      final trackingField = (odooVersion == '18' || odooVersion == '19')
-          ? 'service_tracking'
-          : 'detailed_type';
+      final compat = await OdooCompat.current();
 
       final domain = [
-        [trackingField, '=', 'event'],
+        [compat.eventProductTrackingField, '=', 'event'],
       ];
       if (search != null && search.isNotEmpty) {
         domain.add(['name', 'ilike', search]);
@@ -29,7 +21,14 @@ class TicketServices {
         'model': 'product.product',
         'method': 'search_read',
         'args': [],
-        'kwargs': {'domain': domain},
+        // Only what TicketPrdModel reads. Every field would also pull product
+        // relations (suppliers, stock…) an event user may not be allowed to
+        // read, failing the whole search.
+        'kwargs': {
+          'domain': domain,
+          'limit': limit,
+          'fields': ['name', 'list_price', 'type'],
+        },
       });
 
       final res = response as List;
@@ -42,9 +41,7 @@ class TicketServices {
     }
   }
 
-
   /// Edit a ticket for an event
-
   Future editTicket({
     required int ticketId,
     required int eventId,
@@ -107,7 +104,6 @@ class TicketServices {
       if (seatsMax != null) data['seats_max'] = seatsMax;
       if (seatsLimit != null) data['limit_max_per_order'] = seatsLimit;
 
-      /// Create the ticket
       final result = await OdooSessionManager.callKwWithCompany({
         'model': 'event.event.ticket',
         'method': 'create',

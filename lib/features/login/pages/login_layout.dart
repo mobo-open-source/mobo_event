@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'dart:async';
 import 'dart:math' as math;
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/screen_layout.dart';
 
 class LoginLayout extends StatelessWidget {
   final String title;
@@ -18,28 +21,56 @@ class LoginLayout extends StatelessWidget {
     this.backButton,
   });
 
+  /// Wraps the form so every field underneath picks up the login look.
+  Widget _themedForm(BuildContext context) {
+    return Theme(
+      data: Theme.of(context).copyWith(
+        inputDecorationTheme: Theme.of(context).inputDecorationTheme.copyWith(
+          errorStyle: const TextStyle(color: Colors.white),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: StatusColors.red, width: 1.0),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.white, width: 1.5),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    /// Let Flutter handle system UI automatically
+    // A phone on its side has no room for a header pinned above the form, so
+    // the header scrolls with the form as one page.
+    final compact = context.isLandscape && context.isShortScreen;
 
     return Scaffold(
       body: Stack(
         children: [
-          /// Background
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
-                color: isDark ? Colors.grey[950] : Colors.grey[50],
+                color: isDark ? Colors.grey[900] : Colors.grey[50],
                 image: DecorationImage(
-                  ///set your login image
                   image: AssetImage('assets/images/loginbg.png'),
                   fit: BoxFit.cover,
                   colorFilter: ColorFilter.mode(
                     isDark
-                        ? Colors.black.withOpacity(1)
-                        : Colors.white.withOpacity(1),
+                        ? Colors.black.withValues(alpha: 1)
+                        : Colors.white.withValues(alpha: 1),
                     BlendMode.dstATop,
                   ),
                 ),
@@ -47,116 +78,111 @@ class LoginLayout extends StatelessWidget {
             ),
           ),
 
-          /// Main content
-          LayoutBuilder(
-            builder: (context, viewportConstraints) {
-              return Column(
-                children: [
-                  /// App name and logo at the top
-                  SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 68),
-                      child: _buildAppHeader(),
+          if (compact)
+            Positioned.fill(
+              child: LoginCompactBody(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FittedBox(fit: BoxFit.scaleDown, child: _buildAppHeader()),
+                    const SizedBox(height: 16),
+                    _buildSignInHeader(),
+                    const SizedBox(height: 24),
+                    _themedForm(context),
+                  ],
+                ),
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, viewportConstraints) {
+                return Column(
+                  children: [
+                    SafeArea(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 68),
+                        child: _buildAppHeader(),
+                      ),
                     ),
-                  ),
 
-                  /// Scrollable content area for sign-in form
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minHeight:
-                              viewportConstraints.maxHeight -
-                              180, // Account for header height
-                        ),
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 400),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24.0,
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  /// Sign In header
-                                  _buildSignInHeader(),
-                                  const SizedBox(height: 40),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: math.max(
+                              0,
+                              viewportConstraints.maxHeight - 180,
+                            ), // Account for header height
+                          ),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 400),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24.0,
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildSignInHeader(),
+                                    const SizedBox(height: 40),
 
-                                  /// Form section with consistent theme
-                                  Theme(
-                                    data: Theme.of(context).copyWith(
-                                      inputDecorationTheme: Theme.of(context)
-                                          .inputDecorationTheme
-                                          .copyWith(
-                                            errorStyle: const TextStyle(
-                                              color: Colors.white,
-                                            ),
-                                            errorBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              borderSide: BorderSide(
-                                                color: Colors.red[900]!,
-                                                width: 1.0,
-                                              ),
-                                            ),
-                                            focusedErrorBorder:
-                                                OutlineInputBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(12),
-                                                  borderSide: const BorderSide(
-                                                    color: Colors.white,
-                                                    width: 1.5,
-                                                  ),
-                                                ),
-                                            enabledBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              borderSide: BorderSide.none,
-                                            ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              borderSide: BorderSide.none,
-                                            ),
-                                          ),
-                                    ),
-                                    child: child,
-                                  ),
-                                ],
+                                    _themedForm(context),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              );
-            },
-          ),
+                  ],
+                );
+              },
+            ),
 
-          /// Back button (if provided)
           if (backButton != null) backButton!,
         ],
       ),
     );
   }
 
-  /// Build app header (Sales App + logo at top)
+  /// The calendar in `assets/app_logo.png` fills only the centre 113×113 of
+  /// its 273×185 canvas; the rest is transparent margin.
+  static const double _logoSize = 32;
+  static const double _logoScale = _logoSize / 113;
+
+  /// Build app header (logo + "mobo event" wordmark at top)
   Widget _buildAppHeader() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Image.asset(
-          "assets/app_logo.png",
-          width: 80,
-          height: 80,
-          fit: BoxFit.contain,
+        // "mobo event" has no descenders but YaroRg reserves room for them,
+        // so the letters sit ~4px above the centre of the text box; the
+        // bottom padding lifts the logo by the same amount.
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+
+          // Scale the canvas until the calendar alone is [_logoSize] and let
+          // the transparent margin spill outside the box, so the gap to the
+          // wordmark is the 12px below rather than invisible padding.
+          child: SizedBox.square(
+            dimension: _logoSize,
+            child: OverflowBox(
+              maxWidth: double.infinity,
+              maxHeight: double.infinity,
+              child: Image.asset(
+                "assets/app_logo.png",
+                width: 273 * _logoScale,
+                height: 185 * _logoScale,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 12),
         Text(
           'mobo event',
           style: const TextStyle(
@@ -173,10 +199,9 @@ class LoginLayout extends StatelessWidget {
   Widget _buildSignInHeader() {
     return Column(
       children: [
-        /// "Sign In" text
         Text(
           title,
-          style: GoogleFonts.montserrat(
+          style: GoogleFonts.manrope(
             fontWeight: FontWeight.w600,
             color: Colors.white,
             fontSize: 22,
@@ -185,7 +210,6 @@ class LoginLayout extends StatelessWidget {
         ),
         const SizedBox(height: 8),
 
-        /// Subtitle text
         Text(
           subtitle,
           style: GoogleFonts.manrope(
@@ -196,6 +220,90 @@ class LoginLayout extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
       ],
+    );
+  }
+}
+
+/// The round back arrow the auth screens float over their top-left corner.
+///
+/// A null [onPressed] greys it out, for the stretch where leaving the screen
+/// would abandon a request that is still running.
+class LoginBackButton extends StatelessWidget {
+  final VoidCallback? onPressed;
+
+  const LoginBackButton({super.key, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    // On its side the corner is where a notch or camera cut-out lives and the
+    // status bar eats into the short height, so the button tucks inside the
+    // safe area instead of sitting at the portrait offset.
+    final compact = context.isLandscape && context.isShortScreen;
+    final inset = MediaQuery.paddingOf(context);
+
+    return Positioned(
+      top: compact ? inset.top : 24,
+      left: compact ? inset.left : 0,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(32),
+          child: Container(
+            height: 64,
+            width: 64,
+            alignment: Alignment.center,
+            child: HugeIcon(
+              icon: HugeIcons.strokeRoundedArrowLeft01,
+              color: onPressed == null ? Colors.white54 : Colors.white,
+              size: 24,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The landscape body the auth screens share: ONE page that scrolls as a
+/// whole, with everything stacked in a single column.
+///
+/// A phone on its side is only ~300–400dp tall, too short to pin a header
+/// above the form. Here the header is part of the same scroll as the form, so
+/// with the keyboard up the page scrolls to the focused field and to the
+/// button. The column is centred and capped to a readable width, sits inside
+/// the safe area so nothing hides behind a notch, and is vertically centred
+/// when it happens to fit.
+class LoginCompactBody extends StatelessWidget {
+  final Widget child;
+
+  const LoginCompactBody({super.key, required this.child});
+
+  static const _padding = EdgeInsets.fromLTRB(24, 12, 24, 16);
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            padding: _padding,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: math.max(
+                  0,
+                  constraints.maxHeight - _padding.vertical,
+                ),
+              ),
+              child: ConstrainedContent(
+                maxWidth: 400,
+                alignment: Alignment.center,
+                child: child,
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -265,10 +373,10 @@ class LoginTextField extends StatelessWidget {
         hintStyle: GoogleFonts.manrope(
           fontSize: 14,
           fontWeight: FontWeight.w400,
-          color: Colors.black.withOpacity(.4),
+          color: Colors.black.withValues(alpha: .4),
         ),
         prefixIcon: Padding(
-          padding: const EdgeInsets.all(15),
+          padding: const EdgeInsets.all(12.0),
           child: prefixIcon,
         ),
         prefixIconColor: WidgetStateColor.resolveWith(
@@ -277,7 +385,7 @@ class LoginTextField extends StatelessWidget {
               : Colors.black54,
         ),
         suffixIcon: hasError
-            ? Icon(Icons.error_outline, color: Colors.red, size: 20)
+            ? Icon(Icons.error_outline, color: StatusColors.red, size: 20)
             : suffixIcon,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -330,10 +438,9 @@ class _LoginDropdownFieldState extends State<LoginDropdownField> {
   }
 
   Future<void> _handleMenuOpen(BuildContext context) async {
-    /// Close keyboard immediately
     FocusScope.of(context).unfocus();
 
-    /// Wait for keyboard to close, then open dropdown
+    // Wait for keyboard to close, then open dropdown
     await Future.delayed(const Duration(milliseconds: 250));
 
     if (!mounted) return;
@@ -343,42 +450,52 @@ class _LoginDropdownFieldState extends State<LoginDropdownField> {
   void _showDropdownOverlay() {
     final uniqueItems = widget.items.toSet().toList();
     if (uniqueItems.isEmpty) return;
-    if (_overlayEntry != null) return;
+    if (_overlayEntry != null) return; // already open
 
-    /// already open
-
-    /// Calculate field width
     final renderBox = context.findRenderObject() as RenderBox?;
     final fieldWidth =
         renderBox?.size.width ?? (MediaQuery.of(context).size.width - 48);
 
-    /// Calculate dynamic height so the dropdown doesn't hit the bottom of the screen
+    // Calculate dynamic height so the dropdown doesn't hit the bottom of the screen
     final fieldOffset = renderBox?.localToGlobal(Offset.zero) ?? Offset.zero;
     final screenHeight = MediaQuery.of(context).size.height;
     final fieldHeight = renderBox?.size.height ?? 0;
-    final availableBelow = screenHeight - (fieldOffset.dy + fieldHeight) - 16;
+    final availableBelow = screenHeight - (fieldOffset.dy + fieldHeight) - 16; // keep 16px margin
 
-    /// keep 16px margin
-    /// Limit visible items to 5 rows (others scroll)
-    const double itemHeight = 44.0;
-
-    /// consistent row height
-    const double listVerticalPadding = 16.0;
-
-    /// 8 top + 8 bottom
+    // Limit visible items to 5 rows (others scroll)
+    const double itemHeight = 44.0; // consistent row height
+    const double listVerticalPadding = 16.0; // 8 top + 8 bottom
     final double heightForFiveItems = itemHeight * 5 + listVerticalPadding;
-    final double maxDropdownHeight = math.max(
-      120.0,
-
-      /// minimum sensible height (~2 items)
+    double maxDropdownHeight = math.max(
+      120.0, // minimum sensible height (~2 items)
       math.min(availableBelow, heightForFiveItems),
     );
+
+    // On a phone on its side the field often sits low in the window, with
+    // less room under it than the list needs. Portrait keeps the list below
+    // the field; here it opens upwards when that side has more room, and is
+    // capped to the room it opens into so it never runs off the window.
+    var openUp = false;
+    if (context.isLandscape && context.isShortScreen) {
+      final media = MediaQuery.of(context);
+      final below =
+          screenHeight -
+          media.viewInsets.bottom -
+          (fieldOffset.dy + fieldHeight) -
+          16;
+      final above = fieldOffset.dy - media.padding.top - 16;
+      openUp = below < heightForFiveItems && above > below;
+      maxDropdownHeight = math.max(
+        64.0,
+        math.min(openUp ? above : below, heightForFiveItems),
+      );
+    }
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     _overlayEntry = OverlayEntry(
       builder: (overlayContext) => Stack(
         children: [
-          /// Tap outside to dismiss
+          // Tap outside to dismiss
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
@@ -390,19 +507,20 @@ class _LoginDropdownFieldState extends State<LoginDropdownField> {
             child: CompositedTransformFollower(
               link: _layerLink,
               showWhenUnlinked: false,
-              offset: const Offset(0, 58),
+              followerAnchor: openUp ? Alignment.bottomLeft : Alignment.topLeft,
+              offset: Offset(0, openUp ? -4 : 58),
               child: Material(
-                elevation: 12.0,
+                elevation: 4,
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                shadowColor: Colors.black.withOpacity(0.2),
+                shadowColor: Colors.black.withValues(alpha: 0.2),
                 child: Container(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: isDark
-                          ? Colors.white.withOpacity(0.1)
-                          : Colors.black.withOpacity(0.1),
+                          ? Colors.white.withValues(alpha: 0.1)
+                          : Colors.black.withValues(alpha: 0.1),
                       width: 1,
                     ),
                   ),
@@ -447,7 +565,7 @@ class _LoginDropdownFieldState extends State<LoginDropdownField> {
       ),
     );
 
-    /// Insert into overlay layer after build frame
+    // Insert into overlay layer after build frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _overlayEntry == null) return;
       final overlayState = Overlay.maybeOf(context);
@@ -479,18 +597,18 @@ class _LoginDropdownFieldState extends State<LoginDropdownField> {
         validator: widget.validator,
         autovalidateMode: widget.autovalidateMode,
         builder: (field) {
-          /// Keep the FormField's internal value in sync with the external widget.value
+          // Keep the FormField's internal value in sync with the external widget.value
           final externalValue = uniqueItems.contains(widget.value)
               ? widget.value
               : null;
           if (field.value != externalValue) {
-            /// Schedule the change after build to avoid setState during build
+            // Schedule the change after build to avoid setState during build
             WidgetsBinding.instance.addPostFrameCallback((_) {
               field.didChange(externalValue);
             });
           }
 
-          /// Always use the external (provider-backed) value for display
+          // Always use the external (provider-backed) value for display
           final effectiveValue = externalValue;
           final showErrorIcon =
               widget.hasError &&
@@ -512,7 +630,7 @@ class _LoginDropdownFieldState extends State<LoginDropdownField> {
                           : Colors.black54,
                     ),
                     suffixIcon: showErrorIcon
-                        ? Icon(Icons.error, color: Colors.red[900], size: 20)
+                        ? Icon(Icons.error, color: StatusColors.red, size: 20)
                         : InkWell(
                             borderRadius: BorderRadius.circular(20),
                             onTap: () {
@@ -552,7 +670,7 @@ class _LoginDropdownFieldState extends State<LoginDropdownField> {
                       fontSize: 14,
                       fontWeight: FontWeight.w400,
                       color: (effectiveValue == null || effectiveValue.isEmpty)
-                          ? Colors.black.withOpacity(.4)
+                          ? Colors.black.withValues(alpha: .4)
                           : Colors.black,
                     ),
                   ),
@@ -574,8 +692,11 @@ class LoginErrorDisplay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 40,
+    // At least 40 — what a one- or two-line message needs — but free to grow,
+    // so a longer one (the expired-database notice runs to three lines on a
+    // narrow phone) pushes what follows down instead of overflowing.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 40),
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 320),
         switchInCurve: Curves.easeOut,
@@ -656,7 +777,7 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
   void initState() {
     super.initState();
 
-    /// Listen for user typing/pasting a full URL including protocol
+    // Listen for user typing/pasting a full URL including protocol
     widget.controller.addListener(_handleTypedProtocolInField);
   }
 
@@ -684,23 +805,20 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
     }
 
     if (detectedProtocol != null) {
-      /// Inform parent that a full URL with protocol was entered
       widget.onProtocolAutoDetected?.call();
       _isAdjustingText = true;
       try {
-        /// Update protocol selector if different
         if (widget.onProtocolChanged != null &&
             widget.selectedProtocol != detectedProtocol) {
           widget.onProtocolChanged!(detectedProtocol);
         }
 
-        /// Strip protocol from the text field so only domain/host remains
+        // Strip protocol from the text field so only domain/host remains
         if (domain != raw) {
           widget.controller
             ..text = domain
             ..selection = TextSelection.collapsed(offset: domain.length);
 
-          /// Propagate sanitized value to parent listeners
           widget.onChanged?.call(domain);
         }
       } finally {
@@ -710,10 +828,9 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
   }
 
   Future<void> _handleProtocolMenuOpen(BuildContext context) async {
-    /// Close keyboard immediately
     FocusScope.of(context).unfocus();
 
-    /// Wait for keyboard to close, then open dropdown
+    // Wait for keyboard to close, then open dropdown
     await Future.delayed(const Duration(milliseconds: 250));
 
     if (!mounted) return;
@@ -781,12 +898,11 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
         hintStyle: GoogleFonts.manrope(
           fontSize: 14,
           fontWeight: FontWeight.w400,
-          color: Colors.black.withOpacity(.4),
+          color: Colors.black.withValues(alpha: .4),
         ),
         prefixIcon: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            /// Server icon
             Padding(
               padding: const EdgeInsets.only(left: 12, right: 8),
               child: Icon(
@@ -796,12 +912,11 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
               ),
             ),
 
-            /// Protocol dropdown
             Container(
               decoration: BoxDecoration(
                 border: Border(
                   right: BorderSide(
-                    color: Colors.black.withOpacity(0.2),
+                    color: Colors.black.withValues(alpha: 0.2),
                     width: 1,
                   ),
                 ),
@@ -849,7 +964,7 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
         ),
         prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
         suffixIcon: widget.hasError
-            ? Icon(Icons.error_outline, color: Colors.red, size: 20)
+            ? Icon(Icons.error_outline, color: StatusColors.red, size: 20)
             : widget.isLoading
             ? Padding(
                 padding: const EdgeInsets.all(12.0),
@@ -903,7 +1018,7 @@ class LoginButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.black,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: Colors.black.withOpacity(.2),
+          disabledBackgroundColor: Colors.black.withValues(alpha: .2),
           disabledForegroundColor: Colors.white,
           overlayColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,

@@ -10,11 +10,12 @@ void loadingDialog(
     Widget icon,
 
     ){
+  final isDark = Theme.of(context).brightness == Brightness.dark;
   dialogBox(context,title,icon,
       Text(subTitle,
 
         style: TextStyle(
-            color: Colors.black54
+            color: isDark ? Colors.white70 : Colors.black54
         ),
         textAlign: TextAlign.center,
       ));

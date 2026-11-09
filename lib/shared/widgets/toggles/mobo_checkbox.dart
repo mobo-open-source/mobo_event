@@ -48,15 +48,15 @@ class _MoboCheckboxState extends State<MoboCheckbox> {
             color: widget.value
                 ? primary
                 : (_hovering
-                ? primary.withOpacity(0.10)
+                ? primary.withValues(alpha: 0.10)
                 : Colors.transparent),
           ),
           child: widget.value
-              ? const Icon(
-            Icons.check_rounded,
-            size: 14,
-            color: Colors.white,
-          )
+              ? Icon(
+                  Icons.check_rounded,
+                  size: widget.size * 0.75,
+                  color: Colors.white,
+                )
               : null,
         ),
       ),
@@ -64,3 +64,55 @@ class _MoboCheckboxState extends State<MoboCheckbox> {
   }
 }
 
+
+/// A [MoboCheckbox] with a label; tapping anywhere on the row toggles it.
+/// Replaces Material's CheckboxListTile so every labelled checkbox in the
+/// app looks the same. Forms set [checkboxAtEnd] so the label sits on the
+/// left like their other fields; lists keep the box leading.
+class MoboCheckboxTile extends StatelessWidget {
+  final String title;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final EdgeInsetsGeometry padding;
+  final bool checkboxAtEnd;
+
+  const MoboCheckboxTile({
+    super.key,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.padding = const EdgeInsets.symmetric(vertical: 10),
+    this.checkboxAtEnd = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final label = Expanded(
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: AppTheme.textPrimaryOn(isDark),
+        ),
+      ),
+    );
+    // The row handles the tap, so the box itself stays passive.
+    final box = IgnorePointer(
+      child: MoboCheckbox(value: value, onChanged: onChanged),
+    );
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      onTap: onChanged == null ? null : () => onChanged!(!value),
+      child: Padding(
+        padding: padding,
+        child: Row(
+          children: checkboxAtEnd
+              ? [label, const SizedBox(width: 12), box]
+              : [box, const SizedBox(width: 12), label],
+        ),
+      ),
+    );
+  }
+}

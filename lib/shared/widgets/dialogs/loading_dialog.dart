@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../loaders/loading_widget.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// Reusable loading dialog
 class LoadingDialog {
@@ -9,15 +10,15 @@ class LoadingDialog {
     showDialog(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withOpacity(0.2),
+      barrierColor: Colors.black.withValues(alpha: 0.2),
       builder: (ctx) => PopScope(
         canPop: false,
         child: Center(
           child: IntrinsicWidth(
             child: Card(
-              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              elevation: 8,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              color: isDark ? AppTheme.darkSurface : Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
                 child: Column(

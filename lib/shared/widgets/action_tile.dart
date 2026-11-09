@@ -9,6 +9,10 @@ class ActionTile extends StatelessWidget {
   final Widget? trailing;
   final bool destructive;
 
+  /// Tints the icon and the title (the subtitle stays grey). Takes precedence
+  /// over [destructive]'s red.
+  final Color? accentColor;
+
   const ActionTile({
     super.key,
     required this.title,
@@ -17,17 +21,22 @@ class ActionTile extends StatelessWidget {
     this.onTap,
     this.trailing,
     this.destructive = false,
+    this.accentColor,
   });
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color titleColor = destructive
-        ? const Color(0xFFD32F2F)
-        : (isDark ? Colors.white : Colors.black87);
-    final Color iconColor = destructive
-        ? const Color(0xFFD32F2F)
-        : (isDark ? Colors.grey[400]! : Colors.grey[600]!);
+    final Color titleColor =
+        accentColor ??
+        (destructive
+            ? const Color(0xFFD32F2F)
+            : (isDark ? Colors.white : Colors.black87));
+    final Color iconColor =
+        accentColor ??
+        (destructive
+            ? const Color(0xFFD32F2F)
+            : (isDark ? Colors.grey[400]! : Colors.grey[600]!));
 
     return ListTile(
       leading: HugeIcon(icon: icon, color: iconColor),

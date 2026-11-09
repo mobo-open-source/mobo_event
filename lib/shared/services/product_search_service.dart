@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import '../../core/services/odoo_session_manager.dart';
 
 /// Service for fetching products with pagination and search
@@ -14,27 +13,20 @@ class ProductSearchService {
     try {
       final client = await OdooSessionManager.getClientEnsured();
 
-      /// Build domain for filtering
       List<dynamic> domain = [];
 
-      /// Filter for storable products (type = 'product' or 'consu')
       if (storableOnly) {
         domain.add('|');
         domain.add(['type', '=', 'product']);
         domain.add(['type', '=', 'consu']);
       }
 
-      /// Add search filter if provided
       if (searchQuery != null && searchQuery.isNotEmpty) {
         domain.add('|');
         domain.add(['name', 'ilike', searchQuery]);
         domain.add('|');
         domain.add(['default_code', 'ilike', searchQuery]);
         domain.add(['barcode', 'ilike', searchQuery]);
-      }
-
-      if (kDebugMode) {
-
       }
 
       final result = await client.callKw({
@@ -65,13 +57,8 @@ class ProductSearchService {
 
       final products = (result as List).cast<Map<String, dynamic>>();
 
-      if (kDebugMode) {
-
-      }
-
       return products;
-    } catch (e) {
-
+    } catch (_) {
       rethrow;
     }
   }
@@ -84,17 +71,14 @@ class ProductSearchService {
     try {
       final client = await OdooSessionManager.getClientEnsured();
 
-      /// Build domain for filtering
       List<dynamic> domain = [];
 
-      /// Filter for storable products
       if (storableOnly) {
         domain.add('|');
         domain.add(['type', '=', 'product']);
         domain.add(['type', '=', 'consu']);
       }
 
-      /// Add search filter if provided
       if (searchQuery != null && searchQuery.isNotEmpty) {
         domain.add('|');
         domain.add(['name', 'ilike', searchQuery]);
@@ -111,7 +95,7 @@ class ProductSearchService {
       });
 
       return result as int;
-    } catch (e) {
+    } catch (_) {
       return 0;
     }
   }

@@ -29,11 +29,10 @@ class EventActivityServices {
           .toList();
 
       return activityList;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
-
 
   ///mark as done to odooo
   Future<void> markAsDone(int activityId) async {
@@ -46,9 +45,12 @@ class EventActivityServices {
         ],
         'kwargs': {},
       });
-    } catch (e) {}
+    } catch (_) {
+      // Not swallowed: a refusal has to reach the card, which otherwise says
+      // "Activity Done" over an activity the server left open.
+      rethrow;
+    }
   }
-
 
   ///remove the activity
   Future<void> removeActivity(int activityId) async {
@@ -61,10 +63,11 @@ class EventActivityServices {
         ],
         'kwargs': {},
       });
-    } catch (e) {}
+    } catch (_) {
+      // Not swallowed, for the same reason as [markAsDone].
+      rethrow;
+    }
   }
-
-
 
   ///fetch activity types from odoo
   Future<List<ActivityTypeModel>> fetchActivityTypes({
@@ -101,7 +104,6 @@ class EventActivityServices {
       domain.add(['name', 'ilike', search]);
     }
 
-    ///fetch the users
     final res = await OdooSessionManager.callKwWithCompany({
       'model': 'res.users',
       'method': 'search_read',
@@ -117,7 +119,6 @@ class EventActivityServices {
     return (res as List).map((e) => UserModel.fromJson(e)).toList();
   }
 
-
   /// create method
   Future<int> createActivity({
     required int resId,
@@ -131,7 +132,6 @@ class EventActivityServices {
     try {
       final client = await OdooSessionManager.getClient();
 
-      /// create
       final res = await client!.callKw({
         'model': 'mail.activity.schedule',
         'method': 'create',
@@ -154,7 +154,6 @@ class EventActivityServices {
         },
       });
 
-      ///schedule the activity
       await OdooSessionManager.callKwWithCompany({
         'model': 'mail.activity.schedule',
         'method': 'action_schedule_activities',
@@ -171,7 +170,7 @@ class EventActivityServices {
       });
 
       return res as int;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
@@ -186,7 +185,6 @@ class EventActivityServices {
     required String deadline,
   }) async {
     try {
-      ///update the activity
       await OdooSessionManager.callKwWithCompany({
         'model': 'mail.activity',
         'method': 'write',
@@ -201,7 +199,7 @@ class EventActivityServices {
           },
         ],
       });
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }

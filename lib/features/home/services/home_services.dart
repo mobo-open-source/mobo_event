@@ -1,7 +1,6 @@
-import 'dart:convert';
-
 import 'package:mobo_event/core/models/event_stage.dart';
 import 'package:mobo_event/core/services/odoo_session_manager.dart';
+import 'package:mobo_event/core/utils/odoo_binary.dart';
 import 'package:mobo_event/features/home/model/event_short.dart';
 import 'package:mobo_event/features/home/model/user_short_model.dart';
 
@@ -11,7 +10,6 @@ class HomeServices {
     try {
       await OdooSessionManager.getAllowedCompaniesList();
 
-      /// getting stages from odoo
       final res = await OdooSessionManager.callKwWithCompany({
         'model': 'event.stage',
         'method': 'search_read',
@@ -23,11 +21,10 @@ class HomeServices {
           .map((single) => EventStage.fromJson(single))
           .toList();
       return stageList;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
-
 
   /// getting events details
   Future<List<EventShort>> gettingEventsShort({
@@ -63,8 +60,6 @@ class HomeServices {
         }
       }
 
-
-      /// getting events
       final response = await OdooSessionManager.callKwWithCompany({
         'model': 'event.event',
         'method': 'search_read',
@@ -79,7 +74,6 @@ class HomeServices {
       final userImageList = await Future.wait(
         uniqueUserIds.map((userId) async {
           try {
-            /// getting user image
             final userRes = await OdooSessionManager.callKwWithCompany({
               'model': 'res.users',
               'method': 'read',
@@ -91,23 +85,20 @@ class HomeServices {
             });
 
             final data = userRes[0];
-            final imgBase64 = data['image_1920'];
 
             return UserShortModel(
               userId: data['id'],
               name: data['name'],
-              image: imgBase64 != null ? base64Decode(imgBase64) : null,
+              // Base64 text through Odoo 19, a {content, size} object on 20.
+              image: OdooBinary.bytes(data['image_1920']),
             );
-          } catch (e) {
+          } catch (_) {
             return null;
           }
         }),
       );
 
-
-      /// updating user image
       final userMap = {
-
         for (var u in userImageList.whereType<UserShortModel>()) u.userId!: u,
       };
 
@@ -120,11 +111,145 @@ class HomeServices {
       }).toList();
 
       return updatedEvents;
-    } catch (e) {
+    } catch (_) {
       rethrow;
     }
   }
 
+  /// Moves an event to a different stage (kanban column drag, or any other
+  /// stage change) by writing `stage_id` directly.
+  Future<bool> updateEventStage({
+    required int eventId,
+    required int stageId,
+  }) async {
+    try {
+      final res = await OdooSessionManager.callKwWithCompany({
+        'model': 'event.event',
+        'method': 'write',
+        'args': [
+          [eventId],
+          {'stage_id': stageId},
+        ],
+        'kwargs': {},
+      });
+
+      return res == true;
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  /// Moves an event to another group of a grouped board by writing the field
+  /// that grouping is on (`user_id`, `event_type_id`, `address_id`) — what
+  /// Odoo's own kanban does when a card is dropped on a column. [id] 0 is the
+  /// "none" column: the field is cleared.
+  Future<bool> updateEventRelation({
+    required int eventId,
+    required String field,
+    required int id,
+  }) async {
+    try {
+      final res = await OdooSessionManager.callKwWithCompany({
+        'model': 'event.event',
+        'method': 'write',
+        'args': [
+          [eventId],
+          {field: id == 0 ? false : id},
+        ],
+        'kwargs': {},
+      });
+
+      return res == true;
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  /// Renames a stage (kanban column header's "⋮" action).
+  Future<bool> renameStage({required int stageId, required String name}) async {
+    try {
+      final res = await OdooSessionManager.callKwWithCompany({
+        'model': 'event.stage',
+        'method': 'write',
+        'args': [
+          [stageId],
+          {'name': name},
+        ],
+        'kwargs': {},
+      });
+      return res == true;
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  /// Persists one stage's new column position (kanban column drag).
+  Future<bool> updateStageSequence({
+    required int stageId,
+    required int sequence,
+  }) async {
+    try {
+      final res = await OdooSessionManager.callKwWithCompany({
+        'model': 'event.stage',
+        'method': 'write',
+        'args': [
+          [stageId],
+          {'sequence': sequence},
+        ],
+        'kwargs': {},
+      });
+      return res == true;
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  /// Deletes a stage (kanban column's "Delete" action). Odoo refuses to
+  /// unlink a stage that events still reference, so a blocked delete
+  /// surfaces the server's own ValidationError as-is.
+  Future<bool> deleteStage(int stageId) async {
+    try {
+      final res = await OdooSessionManager.callKwWithCompany({
+        'model': 'event.stage',
+        'method': 'unlink',
+        'args': [
+          [stageId],
+        ],
+        'kwargs': {},
+      });
+      return res == true;
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  /// Creates a new event.stage, appended after the current last one so it
+  /// shows up as the last kanban column (mirrors Odoo's own "Add a column").
+  Future<EventStage> createStage(String name, int sequence) async {
+    try {
+      final id = await OdooSessionManager.callKwWithCompany({
+        'model': 'event.stage',
+        'method': 'create',
+        'args': [
+          {'name': name, 'sequence': sequence},
+        ],
+        'kwargs': {},
+      });
+
+      final res = await OdooSessionManager.callKwWithCompany({
+        'model': 'event.stage',
+        'method': 'read',
+        'args': [
+          [id],
+        ],
+        'kwargs': {},
+      });
+
+      return EventStage.fromJson((res as List).first);
+    } catch (_) {
+      rethrow;
+    }
+  }
 
   /// updating kanban state
   Future<bool> updateKanbanState({
@@ -132,7 +257,6 @@ class HomeServices {
     required String newState,
   }) async {
     try {
-      /// updating kanban state
       final res = await OdooSessionManager.callKwWithCompany({
         'model': 'event.event',
         'method': 'write',
@@ -144,8 +268,11 @@ class HomeServices {
       });
 
       return res == true;
-    } catch (e) {
-      return false;
+    } catch (_) {
+      // Not swallowed: a refusal (no write access on the event) has to reach
+      // the caller, which otherwise reports "State changed" over a write that
+      // never happened.
+      rethrow;
     }
   }
 }

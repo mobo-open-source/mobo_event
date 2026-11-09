@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/theme/app_theme.dart';
 
 class CustomTextField extends StatelessWidget {
   final TextEditingController controller;
@@ -42,56 +43,40 @@ class CustomTextField extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
+        // The app's standard field look (see `Field`): filled, radius 12, a
+        // 2px brand ring on focus and a red outline with its message beneath
+        // on error.
         TextFormField(
-          style: TextStyle(
-            fontFamily: GoogleFonts.manrope(
-              fontWeight: FontWeight.w600,
-            ).fontFamily,
-            color: isDark ? Colors.white70 : const Color(0xff000000),
-          ),
+          style: AppTheme.fieldValueStyle(isDark),
+          cursorColor: AppTheme.primaryColor,
           controller: controller,
           onChanged: onChanged,
+          // Shows a required field's message as soon as it is cleared, so a
+          // disabled Save next to it never looks unexplained.
+          autovalidateMode: AutovalidateMode.onUserInteraction,
           keyboardType: keyboardType ?? TextInputType.text,
           maxLines: maxLines,
           decoration: InputDecoration(
             hintText: hintText,
-            hintStyle: TextStyle(
-              fontFamily: GoogleFonts.manrope(
-                fontWeight: FontWeight.w400,
-              ).fontFamily,
-              color: isDark ? Colors.white38 : Colors.grey[500],
-              fontStyle: FontStyle.italic,
-              fontSize: 14,
-            ),
-            prefixText: '',
+            hintStyle: AppTheme.fieldHintStyle(isDark),
             suffixIcon: suffixIcon,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: showBorder ? _getBorderColor() : Colors.transparent,
-                width: 2,
-              ),
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(
+              vertical: 14,
+              horizontal: 12,
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: showBorder
-                    ? Theme.of(context).primaryColor
-                    : Colors.transparent,
-                width: 1,
-              ),
+            border: _outline(
+              showBorder ? _getBorderColor() : AppTheme.restingBorderColor(isDark),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: Theme.of(context).primaryColor,
-                width: 1,
-              ),
+            enabledBorder: _outline(
+              showBorder ? AppTheme.primaryColor : AppTheme.restingBorderColor(isDark),
             ),
+            focusedBorder: _outline(AppTheme.primaryColor, width: 2),
+            errorBorder: _outline(StatusColors.red),
+            focusedErrorBorder: _outline(StatusColors.red, width: 2),
+            errorStyle: const TextStyle(color: StatusColors.red, fontSize: 12),
             filled: true,
-            fillColor: isDark
-                ? const Color(0xFF2A2A2A)
-                : const Color(0xffF8FAFB),
+            fillColor: AppTheme.inputFill(isDark),
           ),
           validator: validator,
         ),
@@ -101,5 +86,12 @@ class CustomTextField extends StatelessWidget {
 
   Color _getBorderColor() {
     return isDark ? Colors.grey[700]! : Colors.grey[400]!;
+  }
+
+  OutlineInputBorder _outline(Color color, {double width = 1}) {
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: color, width: width),
+    );
   }
 }

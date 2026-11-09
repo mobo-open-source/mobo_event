@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'odoo_session_manager.dart';
 
@@ -16,11 +15,9 @@ class ModuleValidationService {
   Future<Map<String, bool>> validateRequiredModules({
     bool forceRefresh = false,
   }) async {
-    // Check cache first
     if (!forceRefresh) {
       final cached = await _loadCachedStatus();
       if (cached != null) {
-
         return cached;
       }
     }
@@ -32,8 +29,8 @@ class ModuleValidationService {
       final inventoryInstalled = await _checkModule(client, 'hr_expense');
       results['stock'] = inventoryInstalled;
       return results;
-    } catch (e) {
-      /// Return empty map on error - let individual features handle it
+    } catch (_) {
+      // Return empty map on error - let individual features handle it
       return {};
     }
   }
@@ -41,7 +38,6 @@ class ModuleValidationService {
   /// Check if a specific module is installed
   Future<bool> _checkModule(dynamic client, String moduleName) async {
     try {
-      /// Try to check if the module exists by querying ir.module.module
       final result = await client.callKw({
         'model': 'ir.module.module',
         'method': 'search_count',
@@ -55,10 +51,9 @@ class ModuleValidationService {
       });
 
       return (result as int) > 0;
-    } catch (e) {
-
-      /// If we can't check, assume it might be installed
-      /// Individual features will fail gracefully if not
+    } catch (_) {
+      // If we can't check, assume it might be installed
+      // Individual features will fail gracefully if not
       return false;
     }
   }
@@ -106,11 +101,9 @@ class ModuleValidationService {
         final lastCheck = DateTime.parse(lastCheckStr);
         final now = DateTime.now();
 
-        /// Check if cache is still valid
         if (now.difference(lastCheck) < _cacheValidDuration) {
           final statusStr = prefs.getString(_cacheKeyModuleStatus);
           if (statusStr != null) {
-            /// Parse the cached status
             final parts = statusStr.split(',');
             final status = <String, bool>{};
             for (final part in parts) {
@@ -123,8 +116,7 @@ class ModuleValidationService {
           }
         }
       }
-    } catch (e) {
-    }
+    } catch (_) {}
     return null;
   }
 
@@ -133,7 +125,6 @@ class ModuleValidationService {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      /// Convert map to string for storage
       final statusStr = status.entries
           .map((e) => '${e.key}:${e.value}')
           .join(',');
@@ -143,10 +134,7 @@ class ModuleValidationService {
         _cacheKeyLastCheck,
         DateTime.now().toIso8601String(),
       );
-
-    } catch (e) {
-
-    }
+    } catch (_) {}
   }
 
   /// Clear cached module status
@@ -155,7 +143,6 @@ class ModuleValidationService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_cacheKeyModuleStatus);
       await prefs.remove(_cacheKeyLastCheck);
-    } catch (e) {
-    }
+    } catch (_) {}
   }
 }

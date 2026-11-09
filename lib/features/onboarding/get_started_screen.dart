@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:dots_indicator/dots_indicator.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/app_entry.dart';
 import '../../core/const/app_colors.dart';
+import '../../core/utils/screen_layout.dart';
 
 class GetStartedScreen extends StatefulWidget {
   const GetStartedScreen({super.key});
@@ -23,7 +25,6 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
     }
     return 'assets/images/android/$baseName.jpg';
   }
-
 
   /// Onboarding data
   late final List<Map<String, String>> onboardingData = [
@@ -71,14 +72,64 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
       backgroundColor: Colors.black,
       body: LayoutBuilder(
         builder: (context, constraints) {
+          // A phone on its side is far too short for the picture above the
+          // copy, so the picture becomes the backdrop and the copy is one
+          // centred, scrollable column over it.
+          if (context.isLandscape && context.isShortScreen) {
+            return Stack(
+              children: [
+                _buildCarousel(
+                  theme,
+                  isDark,
+                  constraints.maxHeight,
+                  constraints.maxWidth,
+                  isDesktop: false,
+                  fillPane: true,
+                ),
+                SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, safe) => SingleChildScrollView(
+                      // Translucent so a horizontal swipe still reaches the
+                      // slides underneath.
+                      hitTestBehavior: HitTestBehavior.translucent,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 16,
+                      ),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: math.max(0, safe.maxHeight - 32),
+                        ),
+                        child: ConstrainedContent(
+                          maxWidth: 480,
+                          alignment: Alignment.center,
+                          child: _buildContent(
+                            theme,
+                            isDark,
+                            isDesktop: false,
+                            compact: true,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
           if (isDesktop) {
             return Row(
               children: [
                 Expanded(
                   flex: 5,
-                  child: _buildCarousel(theme, isDark, constraints.maxHeight,
-                      constraints.maxWidth * 0.55,
-                      isDesktop: true),
+                  child: _buildCarousel(
+                    theme,
+                    isDark,
+                    constraints.maxHeight,
+                    constraints.maxWidth * 0.55,
+                    isDesktop: true,
+                  ),
                 ),
                 Expanded(
                   flex: 4,
@@ -105,9 +156,13 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
               children: [
                 Expanded(
                   flex: 55,
-                  child: _buildCarousel(theme, isDark,
-                      constraints.maxHeight * 0.55, constraints.maxWidth,
-                      isDesktop: false),
+                  child: _buildCarousel(
+                    theme,
+                    isDark,
+                    constraints.maxHeight * 0.55,
+                    constraints.maxWidth,
+                    isDesktop: false,
+                  ),
                 ),
                 Expanded(
                   flex: 45,
@@ -117,11 +172,12 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
                     child: Center(
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 48, vertical: 32),
+                          horizontal: 48,
+                          vertical: 32,
+                        ),
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 600),
-                          child:
-                              _buildContent(theme, isDark, isDesktop: false),
+                          child: _buildContent(theme, isDark, isDesktop: false),
                         ),
                       ),
                     ),
@@ -161,8 +217,13 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
   }
 
   Widget _buildCarousel(
-      ThemeData theme, bool isDark, double height, double width,
-      {required bool isDesktop}) {
+    ThemeData theme,
+    bool isDark,
+    double height,
+    double width, {
+    required bool isDesktop,
+    bool fillPane = false,
+  }) {
     return SizedBox(
       height: height,
       width: width,
@@ -186,25 +247,38 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
             color: theme.primaryColor,
             child: Stack(
               children: [
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: Image.asset(
-                    data['image']!,
-                    width: width,
-                    fit: BoxFit.fitWidth,
-                    alignment: Alignment.topCenter,
+                if (fillPane)
+                  // The artwork is a tall portrait collage, so in a short
+                  // window it is cropped to a band rather than squeezed.
+                  Positioned.fill(
+                    child: Image.asset(
+                      data['image']!,
+                      fit: BoxFit.cover,
+                      // Mid-image: the first slide's own "Welcome" heading
+                      // sits at the very top and would collide with the copy.
+                      alignment: const Alignment(0, -0.1),
+                    ),
+                  )
+                else
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: Image.asset(
+                      data['image']!,
+                      width: width,
+                      fit: BoxFit.fitWidth,
+                      alignment: Alignment.topCenter,
+                    ),
                   ),
-                ),
                 Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Colors.black.withOpacity(0.3),
-                        Colors.black.withOpacity(0.6),
+                        Colors.black.withValues(alpha: fillPane ? 0.55 : 0.3),
+                        Colors.black.withValues(alpha: fillPane ? 0.7 : 0.6),
                       ],
                     ),
                   ),
@@ -217,10 +291,14 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
     );
   }
 
-  Widget _buildContent(ThemeData theme, bool isDark,
-      {required bool isDesktop}) {
-    final fontSize = isDesktop ? 24.0 : 28.0;
-    final descSize = isDesktop ? 14.0 : 16.0;
+  Widget _buildContent(
+    ThemeData theme,
+    bool isDark, {
+    required bool isDesktop,
+    bool compact = false,
+  }) {
+    final fontSize = compact ? 22.0 : (isDesktop ? 24.0 : 28.0);
+    final descSize = compact ? 13.0 : (isDesktop ? 14.0 : 16.0);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -229,7 +307,7 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
         Text(
           onboardingData[currentIndex]['title']!,
           textAlign: TextAlign.center,
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.manrope(
             fontSize: fontSize,
             fontWeight: FontWeight.bold,
             color: Colors.white,
@@ -244,14 +322,14 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
             ],
           ),
         ),
-        SizedBox(height: isDesktop ? 10 : 15),
+        SizedBox(height: compact ? 8 : (isDesktop ? 10 : 15)),
         Text(
           onboardingData[currentIndex]['description']!,
           textAlign: TextAlign.center,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.manrope(
             fontSize: descSize,
-            color: Colors.white.withOpacity(0.8),
-            height: 1.6,
+            color: Colors.white.withValues(alpha: 0.8),
+            height: compact ? 1.5 : 1.6,
             letterSpacing: 0.1,
             shadows: const [
               Shadow(
@@ -262,10 +340,10 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
             ],
           ),
         ),
-        SizedBox(height: isDesktop ? 30 : 40),
+        SizedBox(height: compact ? 20 : (isDesktop ? 30 : 40)),
         SizedBox(
           width: double.infinity,
-          height: isDesktop ? 45 : 55,
+          height: compact ? 45 : (isDesktop ? 45 : 55),
           child: ElevatedButton(
             onPressed: () async {
               await _markGetStartedSeen();
@@ -283,11 +361,11 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
                 borderRadius: BorderRadius.circular(4),
               ),
               elevation: 0,
-              shadowColor: primaryColor.withOpacity(0.3),
+              shadowColor: primaryColor.withValues(alpha: 0.3),
             ),
             child: Text(
               'Get Started',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.manrope(
                 fontSize: isDesktop ? 18 : 17,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
@@ -295,21 +373,21 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
             ),
           ),
         ),
-        SizedBox(height: isDesktop ? 15 : 20),
+        SizedBox(height: compact ? 12 : (isDesktop ? 15 : 20)),
         DotsIndicator(
           dotsCount: onboardingData.length,
           position: currentIndex,
           decorator: DotsDecorator(
             activeColor: Colors.white,
-            color: Colors.white.withOpacity(0.4),
+            color: Colors.white.withValues(alpha: 0.4),
             size: Size.square(isDesktop ? 6.0 : 8.0),
             activeSize: Size(isDesktop ? 12.0 : 16.0, isDesktop ? 6.0 : 8.0),
             activeShape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(5.0),
+              borderRadius: BorderRadius.circular(5),
             ),
           ),
         ),
-        SizedBox(height: isDesktop ? 10 : 20),
+        SizedBox(height: compact ? 0 : (isDesktop ? 10 : 20)),
       ],
     );
   }

@@ -2,27 +2,41 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../exceptions/odoo_error_mapper.dart';
 import 'connectivity_service.dart';
-
+import '../../core/theme/app_theme.dart';
 
 /// Centralized error manager that analyzes errors and returns appropriate error info
 class ErrorManager {
   /// Analyze an error and return structured error information
   static ErrorInfo analyzeError(Object error) {
-    final errorString = error.toString();
+    final odoo = OdooErrorMapper.detailOf(error);
 
-    /// Check for module/model not found errors (PRIORITY CHECK)
+    // An Odoo error's own text includes the whole Python traceback, whose
+    // incidental words ("KeyError", "stock.") would pass for a missing
+    // module. When Odoo gave a class and message, match on those alone — a
+    // genuine missing model still reads "KeyError: 'stock.picking'".
+    final errorString = odoo != null
+        ? '${odoo.name}: ${odoo.message}'
+        : error.toString();
+
+    // Errors Odoo raised on purpose (UserError, AccessError, …) carry a
+    // message written for the user — show that, ahead of the string matching
+    // below.
+    if (odoo != null && odoo.isIntentional) {
+      return _createOdooError(odoo);
+    }
+
+    // Check for module/model not found errors (PRIORITY CHECK)
     if (_isModuleError(errorString)) {
       return _createModuleError(errorString);
     }
 
-    /// Check for connectivity errors
     if (error is NoInternetException) {
       return ErrorInfo(
         type: ErrorType.network,
         title: 'No Internet Connection',
         message: 'Please check your Wi-Fi or mobile data and try again.',
         icon: Icons.wifi_off_rounded,
-        color: Colors.blue.shade700,
+        color: StatusColors.blue,
       );
     }
 
@@ -33,11 +47,10 @@ class ErrorManager {
         message:
             'Cannot connect to the server. Please check your network connection and server URL.',
         icon: Icons.cloud_off_rounded,
-        color: Colors.orange.shade700,
+        color: StatusColors.orange,
       );
     }
 
-    /// Check for authentication errors
     if (_isAuthError(errorString)) {
       return ErrorInfo(
         type: ErrorType.authentication,
@@ -45,11 +58,10 @@ class ErrorManager {
         message:
             'Your session has expired or credentials are invalid. Please sign in again.',
         icon: CupertinoIcons.lock,
-        color: Colors.red.shade700,
+        color: StatusColors.red,
       );
     }
 
-    /// Check for permission/access errors
     if (_isAccessError(errorString)) {
       return ErrorInfo(
         type: ErrorType.permission,
@@ -57,42 +69,60 @@ class ErrorManager {
         message:
             'You don\'t have permission to access this feature. Please contact your administrator.',
         icon: Icons.block_rounded,
-        color: Colors.red.shade700,
+        color: StatusColors.red,
       );
     }
 
-    /// Default to server error
     return ErrorInfo(
       type: ErrorType.server,
       title: 'Server Error',
-      message: OdooErrorMapper.toUserMessage(error),
+      message: odoo?.message ?? OdooErrorMapper.toUserMessage(error),
       icon: Icons.error_outline_rounded,
-      color: Colors.red.shade700,
+      color: StatusColors.red,
+    );
+  }
+
+  static ErrorInfo _createOdooError(OdooErrorDetail odoo) {
+    if (odoo.isAccess) {
+      return ErrorInfo(
+        type: ErrorType.permission,
+        title: 'Access Denied',
+        message: odoo.message!,
+        icon: Icons.block_rounded,
+        color: StatusColors.red,
+      );
+    }
+    return ErrorInfo(
+      type: ErrorType.server,
+      title: switch (odoo.name) {
+        'ValidationError' => 'Validation Error',
+        'MissingError' => 'Record Not Found',
+        _ => 'Server Error',
+      },
+      message: odoo.message!,
+      icon: Icons.error_outline_rounded,
+      color: StatusColors.red,
     );
   }
 
   static bool _isModuleError(String error) {
     final lowerError = error.toLowerCase();
 
-    /// Check for various module error patterns
     return error.contains('KeyError') ||
         lowerError.contains('data model') &&
             lowerError.contains('not available') ||
         lowerError.contains('missing module') ||
         lowerError.contains('model') && lowerError.contains('not found') ||
         lowerError.contains('model') && lowerError.contains('does not exist') ||
-        /// Specific stock/inventory patterns
         lowerError.contains('stock.') &&
             (lowerError.contains('not') || lowerError.contains('error')) ||
         lowerError.contains('product.') &&
             (lowerError.contains('not') || lowerError.contains('error')) ||
-        /// Odoo module patterns
         lowerError.contains('module') && lowerError.contains('not installed') ||
         lowerError.contains('app') && lowerError.contains('not installed') ||
-        /// werkzeug 404 with model reference
+        // werkzeug 404 with model reference
         lowerError.contains('404') &&
             (lowerError.contains('stock') || lowerError.contains('product')) ||
-        /// Required app patterns
         lowerError.contains('required app') ||
         lowerError.contains('required module');
   }
@@ -112,11 +142,9 @@ class ErrorManager {
   }
 
   static ErrorInfo _createModuleError(String errorString) {
-    /// Extract model name if present
     String? modelName;
     String? moduleName;
 
-    /// Try to extract from KeyError pattern
     final keyErrorMatch = RegExp(
       r"KeyError: '([a-zA-Z0-9_.]+)'",
     ).firstMatch(errorString);
@@ -124,7 +152,6 @@ class ErrorManager {
       modelName = keyErrorMatch.group(1);
     }
 
-    /// Try to extract from "data model" pattern
     if (modelName == null) {
       final modelMatch = RegExp(
         r'"([a-zA-Z0-9_.]+)" data model',
@@ -134,7 +161,6 @@ class ErrorManager {
       }
     }
 
-    /// Try to extract from error string containing model names
     if (modelName == null) {
       final stockMatch = RegExp(
         r'(stock\.[a-zA-Z0-9_.]+)',
@@ -153,11 +179,9 @@ class ErrorManager {
       }
     }
 
-    /// Map model to module name
     if (modelName != null) {
       moduleName = _getModuleNameFromModel(modelName);
     } else {
-      /// Try to infer from error message
       final lowerError = errorString.toLowerCase();
       if (lowerError.contains('stock') ||
           lowerError.contains('inventory') ||
@@ -182,7 +206,7 @@ class ErrorManager {
           'This feature needs the "$displayModuleName" app to be installed on your Odoo server.\n\n'
           'Please contact your administrator to install the required app.',
       icon: Icons.extension_off_rounded,
-      color: Colors.orange.shade700,
+      color: StatusColors.orange,
       moduleName: displayModuleName,
       modelName: modelName,
     );
@@ -191,42 +215,34 @@ class ErrorManager {
   static String _getModuleNameFromModel(String model) {
     final lowerModel = model.toLowerCase();
 
-    /// Inventory/Stock models
     if (lowerModel.startsWith('stock.') || lowerModel == 'stock') {
       return 'Inventory';
     }
 
-    /// Product models
     if (lowerModel.startsWith('product.') || lowerModel == 'product') {
       return 'Product';
     }
 
-    /// Manufacturing models
     if (lowerModel.startsWith('mrp.')) {
       return 'Manufacturing';
     }
 
-    /// Sales models
     if (lowerModel.startsWith('sale.')) {
       return 'Sales';
     }
 
-    /// Purchase models
     if (lowerModel.startsWith('purchase.')) {
       return 'Purchase';
     }
 
-    /// Accounting models
     if (lowerModel.startsWith('account.')) {
       return 'Accounting';
     }
 
-    /// HR models
     if (lowerModel.startsWith('hr.')) {
       return 'HR';
     }
 
-    /// Partners/Contacts
     if (lowerModel == 'res.partner') {
       return 'Contacts';
     }

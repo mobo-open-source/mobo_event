@@ -1,7 +1,7 @@
-import 'dart:convert';
 import 'dart:typed_data';
 import 'package:intl/intl.dart';
-/// EventShort.dart
+import 'package:mobo_event/core/utils/odoo_binary.dart';
+
 class EventShort {
   final int id;
   final String name;
@@ -17,6 +17,16 @@ class EventShort {
   final String kanbanState;
   final String? activityState;
   final int? userId;
+
+  /// Responsible user's name, template and venue — what the list's Group By
+  /// buckets on. Empty (and the id 0, like [userId]) when the field is unset on
+  /// the event: Odoo sends `false`. Zero rather than null so [copyWith] can
+  /// clear them when a card is dropped on a "none" column.
+  final String userName;
+  final int templateId;
+  final String templateName;
+  final int venueId;
+  final String venueName;
   final Uint8List? image;
   final Uint8List? eventImage;
   final List<dynamic>? activityIds;
@@ -39,6 +49,11 @@ class EventShort {
     required this.kanbanState,
     this.activityState,
     this.userId,
+    this.userName = '',
+    this.templateId = 0,
+    this.templateName = '',
+    this.venueId = 0,
+    this.venueName = '',
     this.image,
     this.eventImage,
     this.activityIds,
@@ -51,14 +66,15 @@ class EventShort {
   static String _safeString(dynamic v) => v is String ? v : '';
   static String? _safeNullableString(dynamic v) => v is String ? v : null;
   static int _safeInt(dynamic v) => v is int ? v : 0;
-  static Uint8List? _safeImage(dynamic v) {
-    if (v is String && v.isNotEmpty) {
-      try {
-        return base64Decode(v);
-      } catch (e) {}
-    }
-    return null;
-  }
+  /// A binary field is base64 text through Odoo 19 and a `{content, size}`
+  /// object from 20 — see [OdooBinary].
+  static Uint8List? _safeImage(dynamic v) => OdooBinary.bytes(v);
+
+  /// A many2one comes back as `[id, name]`, or `false` when unset.
+  static int _relationId(dynamic v) =>
+      v is List && v.isNotEmpty && v.first is int ? v.first as int : 0;
+  static String _relationName(dynamic v) =>
+      v is List && v.length > 1 && v[1] is String ? v[1] as String : '';
 
   static DateTime _safeDate(dynamic v) {
     try {
@@ -76,7 +92,7 @@ class EventShort {
 
         return DateTime.parse(cleaned).toLocal();
       }
-    } catch (e) {}
+    } catch (_) {}
     return DateTime.now();
   }
 
@@ -96,7 +112,12 @@ class EventShort {
       name: _safeString(json['display_name']),
       start: _safeDate(json['date_begin']),
       end: _safeDate(json['date_end']),
-      location: _safeString(json['address_inline'] ?? json['address_name']),
+      // Odoo 20 renamed event.event.address_inline to contact_address_inline.
+      location: _safeString(
+        json['contact_address_inline'] ??
+            json['address_inline'] ??
+            json['address_name'],
+      ),
       attended: _safeInt(json['seats_taken']),
       maxSeats: _safeInt(json['seats_max']),
 
@@ -119,6 +140,11 @@ class EventShort {
       userId: json['user_id'] is List
           ? _safeInt(json['user_id'][0])
           : _safeInt(json['user_id']),
+      userName: _relationName(json['user_id']),
+      templateId: _relationId(json['event_type_id']),
+      templateName: _relationName(json['event_type_id']),
+      venueId: _relationId(json['address_id']),
+      venueName: _relationName(json['address_id']),
 
       timeZone: json['date_tz'],
     );
@@ -139,6 +165,12 @@ class EventShort {
     String? kanbanState,
     String? activityState,
     int? userId,
+    String? userName,
+    int? templateId,
+    String? templateName,
+    int? venueId,
+    String? venueName,
+    String? timeZone,
     Uint8List? image,
     List<dynamic>? activityIds,
     List<dynamic>? activityType,
@@ -161,6 +193,12 @@ class EventShort {
       kanbanState: kanbanState ?? this.kanbanState,
       activityState: activityState ?? this.activityState,
       userId: userId ?? this.userId,
+      userName: userName ?? this.userName,
+      templateId: templateId ?? this.templateId,
+      templateName: templateName ?? this.templateName,
+      venueId: venueId ?? this.venueId,
+      venueName: venueName ?? this.venueName,
+      timeZone: timeZone ?? this.timeZone,
       image: image ?? this.image,
       eventImage: eventImage ?? this.eventImage,
       activityIds: activityIds ?? this.activityIds,

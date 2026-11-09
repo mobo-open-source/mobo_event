@@ -2,14 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mobo_event/features/questions/providers/questions_provider.dart';
-import 'package:mobo_event/shared/widgets/action_button.dart';
+import 'package:mobo_event/shared/widgets/section_list_state.dart';
 import 'package:mobo_event/shared/widgets/snackbars/custom_snackbar.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/const/app_colors.dart';
-import '../../../core/services/odoo_session_manager.dart';
+import '../../../core/services/event_access_rights.dart';
+import '../../../core/utils/odoo_compat.dart';
+import '../../../core/utils/screen_layout.dart';
+import '../../../shared/helper/helper_method.dart';
+import '../../../shared/widgets/dialogs/common_dialog.dart';
 import '../../../shared/widgets/loading/loading_widget.dart';
 import '../../../shared/widgets/shimmer_card/shimmer_card.dart';
+import '../../home/providers/home_provider.dart';
 import '../services/question_service.dart';
 import '../widgets/create_question.dart';
 import '../widgets/list_add_dialog.dart';
@@ -26,46 +31,92 @@ class EventQuestionPage extends StatefulWidget {
 }
 
 class _EventQuestionPageState extends State<EventQuestionPage> {
-  @override
-  void initState() {
-    super.initState();
-    Future.microtask(() {
-      context.read<QuestionsProvider>().fetchQuestions(widget.eventId);
-    });
+  // Nothing is fetched here: the Details screen loads the questions together
+  // with the rest of the event, and reloads them on refresh.
+  final services = QuestionService();
+
+  /// True while an Add tap is getting ready to open its dialog, so a second tap
+  /// doesn't start another.
+  bool _opening = false;
+
+  /// Odoo 19 and newer pick from reusable questions; 17/18 create one directly.
+  ///
+  /// The picker's list is in hand before its dialog opens, so the dialog shows
+  /// the list rather than a skeleton while it loads: usually it already is (the
+  /// Details screen fetches it as the questions arrive), and otherwise it is
+  /// fetched here first, and a failure is a message instead of an empty dialog.
+  Future<void> _addQuestion(QuestionsProvider provider) async {
+    if (_opening) return;
+    _opening = true;
+    try {
+      final ids = provider.questionList.map((single) => single.id).toList();
+      final compat = await OdooCompat.current();
+      if (!mounted) return;
+
+      if (compat.hasReusableQuestions) {
+        if (!provider.hasFreshRemaining(ids)) {
+          await provider.fetchRemainingQuestions(ids);
+          if (!mounted) return;
+        }
+        showDialog<String>(
+          context: context,
+          builder: (_) => ListAddDialog(ids: ids, eventId: widget.eventId),
+        );
+      } else {
+        showDialog(
+          context: context,
+          builder: (_) =>
+              CreateQuestion(eventId: widget.eventId, previousIds: ids),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      CustomSnackbar.showError(context, cleanedError(e.toString()));
+    } finally {
+      _opening = false;
+    }
   }
 
-  final services = QuestionService();
+  /// Whether this account may add a question the way this server's release
+  /// does it (see [AccessRights.canAddQuestion]).
+  bool _canAdd(BuildContext context) => context
+      .watch<AccessRights>()
+      .canAddQuestion(context.watch<HomeProvider>().compat);
 
   @override
   Widget build(BuildContext context) {
+    // No side padding, same as the Tickets tab's — otherwise its header and
+    // cards sit narrower than the Tickets tab's and don't line up with it.
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.only(left: 10, right: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Questions Information",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-
-          const SizedBox(height: 20),
-
-          Expanded(
-            child: Consumer<QuestionsProvider>(
-              builder: (context, provider, child) {
-                return buildContent(provider, context);
-              },
-            ),
-          ),
-        ],
+      child: Consumer<QuestionsProvider>(
+        builder: (context, provider, child) {
+          final hasQuestions =
+              !provider.isLoading && provider.questionList.isNotEmpty;
+          final canAdd = _canAdd(context);
+          final page = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SectionHeader(
+                title: "Questions Information",
+                onAdd: hasQuestions && canAdd
+                    ? () => _addQuestion(provider)
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              Expanded(child: buildContent(provider, context)),
+            ],
+          );
+          // One scrolling column; on a wide landscape window it is capped and
+          // centred rather than stretched across the whole width.
+          return context.isLandscape ? ConstrainedContent(child: page) : page;
+        },
       ),
     );
   }
 
   /// Build content
   Widget buildContent(QuestionsProvider provider, BuildContext context) {
-    /// If loading, show shimmer
     if (provider.isLoading) {
       return SingleChildScrollView(
         child: Column(
@@ -81,7 +132,7 @@ class _EventQuestionPageState extends State<EventQuestionPage> {
         ),
       );
     }
-    /// If not loading, show content
+
     if (provider.questionList.isNotEmpty) {
       return SingleChildScrollView(
         scrollDirection: Axis.vertical,
@@ -96,36 +147,50 @@ class _EventQuestionPageState extends State<EventQuestionPage> {
               itemBuilder: (context, index) {
                 return QuestionCard(
                   question: provider.questionList[index],
-                  onDelete: () async {
-                    try {
-                      /// Show loading dialog
-                      loadingDialog(
-                        context,
-                        "Deleting ",
-                        "Please wait...",
-                        LoadingAnimationWidget.fourRotatingDots(
-                          color: primaryColor,
-                          size: 30,
-                        ),
-                      );
+                  // Removing a question rewrites the event's `question_ids`.
+                  onDelete: !context.watch<AccessRights>().canRemoveQuestion
+                      ? null
+                      : () async {
+                          final question = provider.questionList[index];
+                          final confirm = await CommonDialog.confirm(
+                            context,
+                            title: 'Delete Question',
+                            message:
+                                'Are you sure you want to delete "${question.title}"?',
+                            confirmText: 'Delete',
+                          );
+                          if (confirm != true || !context.mounted) return;
 
-                      /// Delete question
-                      await services.removeQuestion(
-                        widget.eventId,
-                        provider.questionList[index].id,
-                      );
+                          try {
+                            loadingDialog(
+                              context,
+                              "Deleting ",
+                              "Please wait...",
+                              LoadingAnimationWidget.fourRotatingDots(
+                                color: primaryColor,
+                                size: 30,
+                              ),
+                            );
 
-                      await Provider.of<QuestionsProvider>(
-                        context,
-                        listen: false,
-                      ).fetchQuestions(widget.eventId);
+                            await services.removeQuestion(
+                              widget.eventId,
+                              provider.questionList[index].id,
+                            );
 
-                      hideLoadingDialog(context);
-                    } catch (e) {
-                      hideLoadingDialog(context);
-                      CustomSnackbar.showError(context, "Error While deleting");
-                    }
-                  },
+                            await Provider.of<QuestionsProvider>(
+                              context,
+                              listen: false,
+                            ).fetchQuestions(widget.eventId);
+
+                            hideLoadingDialog(context);
+                          } catch (_) {
+                            hideLoadingDialog(context);
+                            CustomSnackbar.showError(
+                              context,
+                              "Error While deleting",
+                            );
+                          }
+                        },
                   onTap: () {
                     showDialog(
                       context: context,
@@ -138,97 +203,19 @@ class _EventQuestionPageState extends State<EventQuestionPage> {
                 );
               },
             ),
-
-            SizedBox(height: 10),
-            actionButton(
-              label: "Add Questions",
-              icon: HugeIcons.strokeRoundedAdd01,
-              onPressed: () async {
-                final ids = provider.questionList
-                    .map((single) => single.id)
-                    .toList();
-                final session = await OdooSessionManager.getCurrentSession();
-
-                final version = session!.odooSession.serverVersion;
-
-                String odooVersion = version;
-
-                if (odooVersion == '19') {
-                  showDialog<String>(
-                    context: context,
-                    builder: (_) =>
-                        ListAddDialog(ids: ids, eventId: widget.eventId),
-                  );
-                } else {
-                  showDialog(
-                    context: context,
-                    builder: (_) => CreateQuestion(
-                      eventId: widget.eventId,
-                      previousIds: ids,
-                    ),
-                  );
-                }
-              },
-            ),
-
-            SizedBox(height: 20),
           ],
         ),
       );
     }
 
     if (provider.questionList.isEmpty) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 100),
-              const HugeIcon(
-                icon: HugeIcons.strokeRoundedQuestion,
-                size: 60,
-                color: Colors.grey,
-              ),
-              const SizedBox(height: 16),
-              const Text("No Question Information found"),
-              const SizedBox(height: 6),
-              const SizedBox(height: 16),
-
-
-              /// Create Question Button
-              _actionButton(
-                label: "Create Question",
-                icon: HugeIcons.strokeRoundedAdd01,
-                onPressed: () async {
-                  final ids = provider.questionList
-                      .map((single) => single.id)
-                      .toList();
-
-                  final session = await OdooSessionManager.getCurrentSession();
-                  final version = session!.odooSession.serverVersion;
-                  String odooVersion = version;
-
-                  if (odooVersion == '19') {
-                    showDialog<String>(
-                      context: context,
-                      builder: (_) =>
-                          ListAddDialog(ids: ids, eventId: widget.eventId),
-                    );
-                  } else {
-                    showDialog(
-                      context: context,
-                      builder: (_) => CreateQuestion(
-                        eventId: widget.eventId,
-                        previousIds: ids,
-                      ),
-                    );
-                  }
-                },
-              ),
-            ],
-          ),
-        ],
+      return CenteredSectionBody(
+        child: EmptySectionState(
+          icon: HugeIcons.strokeRoundedQuestion,
+          title: "No questions yet",
+          actionLabel: "Add Question",
+          onAction: _canAdd(context) ? () => _addQuestion(provider) : null,
+        ),
       );
     }
     return SingleChildScrollView(
@@ -242,29 +229,6 @@ class _EventQuestionPageState extends State<EventQuestionPage> {
           SizedBox(height: 10),
           FullCardShimmer(height: 100, radius: 5),
         ],
-      ),
-    );
-  }
-
-
-
-  ///action button widget
-  Widget _actionButton({
-    required String label,
-    required List<List<dynamic>> icon,
-    required VoidCallback onPressed,
-  }) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: HugeIcon(icon: icon, size: 16),
-      label: Text(label),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-        elevation: 0,
-        textStyle: TextStyle(fontSize: 12),
       ),
     );
   }
